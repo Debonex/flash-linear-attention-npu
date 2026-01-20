@@ -143,7 +143,6 @@ if (BUILD_OPEN_PROJECT)
     # op tiling
     add_library(cust_opmaster SHARED)
     target_include_directories(cust_opmaster PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/mc2/common/inc
             $<$<BOOL:${BUILD_OPEN_PROJECT}>:$<BUILD_INTERFACE:${ASCEND_CANN_PACKAGE_PATH}/include/experiment>>
     )
     target_compile_options(cust_opmaster PRIVATE
@@ -268,12 +267,6 @@ foreach (OP_DIR ${OP_DIR_LIST})
     endif()
 endforeach ()
 
-if(ENABLE_EXPERIMENTAL)
-    add_subdirectory(experimental/attention)
-else()
-    add_subdirectory(attention)
-endif()
-
 if (UT_TEST_ALL OR OP_HOST_UT OR OP_API_UT OR OP_KERNEL_UT OR OP_GRAPH_UT)
         add_subdirectory(tests/ut/framework_normal)
 endif()
@@ -281,11 +274,6 @@ endif()
 if("${ASCEND_OP_NAME}" STREQUAL "add_example")
     add_subdirectory(examples)
     list(APPEND OP_DIR_LIST ${CMAKE_CURRENT_SOURCE_DIR}/examples/${ASCEND_OP_NAME})
-endif()
-
-if("${ASCEND_OP_NAME}" STREQUAL "all_gather_add")
-    add_subdirectory(examples/mc2)
-    list(APPEND OP_DIR_LIST ${CMAKE_CURRENT_SOURCE_DIR}/examples/mc2/${ASCEND_OP_NAME})
 endif()
 
 list(APPEND OP_LIST ${COMPILED_OPS})
@@ -303,12 +291,6 @@ if(ENABLE_TEST)
     if(TESTS_UT_OPS_TEST)
         OpsTest_AddLaunch()
     endif()
-endif()
-
-
-if (DEFINED MC2_OPT AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mc2/common/CMakeLists.txt AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mc2/3rd/CMakeLists.txt)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/mc2/common)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/mc2/3rd)
 endif()
 
 set(OP_DEPEND_DIR_LIST)
@@ -682,14 +664,6 @@ install(DIRECTORY ${OPS_ADV_UTILS_KERNEL_INC}/
         DESTINATION ${IMPL_INSTALL_DIR}/ascendc/common
 )
 
-install(DIRECTORY ${OPS_ADV_DIR}/mc2/common/inc/kernel
-        DESTINATION ${IMPL_INSTALL_DIR}/ascendc/common/inc
-)
-
-install(DIRECTORY ${OPS_ADV_DIR}/mc2/3rd/
-        DESTINATION ${IMPL_INSTALL_DIR}/ascendc/3rd
-)
-        
 foreach (op_dir ${OP_DIR_LIST})
     get_filename_component(_op_name "${op_dir}" NAME)
     set(CURRENT_KERNEL_DIR "${op_dir}/op_kernel")
