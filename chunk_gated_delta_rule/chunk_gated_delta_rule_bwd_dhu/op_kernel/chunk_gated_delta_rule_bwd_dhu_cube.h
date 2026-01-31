@@ -352,12 +352,12 @@ public:
                         PipeBarrier<PIPE_ALL>();
                         // DumpTensor(gmWsBdv, 302, 128);
                     } // end chunk k @ dh
-                    CrossCoreSetFlag<0x2, PIPE_FIX>(0x1); // 计算完一个chunk的bdv,通知vec可以开始计算对应的dv2
+                    CrossCoreSetFlag<0x2, PIPE_FIX>(CROSS_CORE_C2V_BDV); // 计算完一个chunk的bdv,通知vec可以开始计算对应的dv2
                     
                     // gatedQ @ do
                     // | bdv coreNum * K * V | gQ coreNum * BT * K | qDo coreNum * K * V | wDv2 coreNum * K * V | 
                     {
-                    CrossCoreWaitFlag(0x3); // vec计算完一个chunk的gatedQ,通知cube可以开始计算对应的dh term1
+                    CrossCoreWaitFlag(CROSS_CORE_V2C_GQ); // vec计算完一个chunk的gatedQ,通知cube可以开始计算对应的dh term1
                     gmGq.SetGlobalBuffer((__gm__ ElementGq *)params.workspace + params.gQWorkspaceOffset + coreIdx * params.BT * params.K);
                     gmDo.SetGlobalBuffer((__gm__ ElementDo *)params.dO + curSeqStartOffsetV + chunkIdx * params.BT * params.V);
                     gmDhTerm1.SetGlobalBuffer((__gm__ ElementDh *)params.workspace + params.bdhTerm1WorkspaceOffset + coreIdx * params.K * params.V);
@@ -376,7 +376,7 @@ public:
 
                     auto tensorBlockGq = GetTile(tensorGq,
                                                 tla::MakeCoord(0,0),
-                                                tla::MakeShape(curBT, params.K));
+                                                tla::MakeShape(params.K, curBT));
                     auto tensorBlockDo = GetTile(tensorDo,
                                                 tla::MakeCoord(0,0),
                                                 tla::MakeShape(curBT, params.V));
@@ -393,13 +393,13 @@ public:
                     PipeBarrier<PIPE_ALL>();
                     // load L1A
                     auto tensorL1A = tla::MakeTensor(l1ATensorDh, L1A_LAYOUT_DH, Arch::PositionL1{});
-                    auto tensorGmTileA = GetTile(tensorBlockGq, tla::MakeCoord(0, 0), tla::MakeShape(curBT, params.K));
+                    auto tensorGmTileA = GetTile(tensorBlockGq, tla::MakeCoord(0, 0), tla::MakeShape(params.K, curBT));
                     
                     copyGmToL1A_Dh1(tensorL1A, tensorGmTileA);
                     PipeBarrier<PIPE_ALL>();
-                    if (coreIdx == 3 || coreIdx == 2) {
-                        DumpTensor(l1ATensorDh, 265, 8192);
-                    }
+                    // if (coreIdx == 3 || coreIdx == 2) {
+                    //     DumpTensor(l1ATensorDh, 265, 8192);
+                    // }
 
                     // load L1B
                     auto tensorL1B = tla::MakeTensor(l1BTensorDh, L1B_LAYOUT_DH, Arch::PositionL1{});
@@ -411,9 +411,9 @@ public:
                     // }
 
                     // copy L1A -> L0A
-                    auto layoutAInL0 = tla::MakeLayout<ElementGq, LayoutTagL0A_Dh>(curBT, params.K);
+                    auto layoutAInL0 = tla::MakeLayout<ElementGq, LayoutTagL0A_Dh>(params.K, curBT);
                     auto tensorL0A = tla::MakeTensor(l0ATensorDh, layoutAInL0, Arch::PositionL0A{});
-                    auto tensorTileL1A = GetTile(tensorL1A, tla::MakeCoord(0, 0), tla::MakeShape(curBT, params.K));
+                    auto tensorTileL1A = GetTile(tensorL1A, tla::MakeCoord(0, 0), tla::MakeShape(params.K, curBT));
                     copyL1ToL0A_Dh(tensorL0A, tensorTileL1A);
                     PipeBarrier<PIPE_ALL>();
 
@@ -438,9 +438,9 @@ public:
                     PipeBarrier<PIPE_ALL>();
                     }
                     // if (coreIdx == 3 || coreIdx == 2) {
-                    //     DumpTensor(gmDhTerm1, 302, 512);
+                    DumpTensor(gmDhTerm1, 302, 2048);
                     // }
-                    CrossCoreSetFlag<0x2, PIPE_FIX>(0x2); // 计算完一个chunk的bdv,通知vec可以开始计算对应的dv2
+                    CrossCoreSetFlag<0x2, PIPE_FIX>(CROSS_CORE_C2V_TERM1);
                 }
                 // AscendC::WaitFlag<AscendC::HardEvent::M_MTE1>(mm2mte1EventId); // 等上次MM结束
                 // AscendC::WaitFlag<AscendC::HardEvent::FIX_M>(0);
@@ -560,9 +560,9 @@ __aicore__ inline void GDRCube<DT>::Process()
     //输入
     LayoutTagK tagK = LayoutTagK::MakeLayout<ElementHalf>(this->T, this->K);
     LayoutTagDh tagDh = LayoutTagDh::MakeLayout<ElementHalf>(this->K, this->V);
-    LayoutTagBdv tagBdv = LayoutTagBdv::MakeLayout<ElementHalf>(this->T, this->V);
+    LayoutTagBdv tagBdv = LayoutTagBdv::MakeLayout<ElementHalf>(this->chunkSize, this->V);
 
-    LayoutTagGq tagGq = LayoutTagGq::MakeLayout<ElementHalf>(this->T, this->K);
+    LayoutTagGq tagGq = LayoutTagGq::MakeLayout<ElementHalf>(this->chunkSize, this->K);
     LayoutTagDo tagDo = LayoutTagDo::MakeLayout<ElementHalf>(this->T, this->V);
     LayoutTagBdh tagBdh = LayoutTagBdh::MakeLayout<ElementHalf>(this->K, this->V);
 

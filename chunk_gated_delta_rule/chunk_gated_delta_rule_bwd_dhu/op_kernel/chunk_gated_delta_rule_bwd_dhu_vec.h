@@ -83,6 +83,22 @@ __aicore__ inline void GDRVec<DT>::InitUB()
     this->dvCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dvBufSize, dv2Offset); // 64k
     dv2Offset += this->dvBufSize * FLOAT_DTYPE_SIZE;
     this->bdvCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dvBufSize, dv2Offset); // 64k
+
+    // calc bdh = bdh + qdo*scale - wv2
+    // | bdhCastLocal 64 | qDoCastLocal 64 | wV2CastLocal 64 |
+    // | 32 | bdhLocal   | 32 | qDoLocal   | 32 | wV2Local   |
+    uint64_t offsetDh = 0;
+    uint32_t halfDhBufByte = this->dhBufSize * HALF_DTYPE_SIZE;
+    this->bdhCastLocal = this->vecTbuf.template Get<float>(this->dhBufSize); 
+    this->bdhLocal = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, halfDhBufByte);
+    offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
+    this->qdoCastLocal = this->vecTbuf.template GetWithOffset<float>(this->dhBufSize, offsetDh);
+    this->qdoLocal = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, offsetDh + halfDhBufByte);
+    offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
+    this->wv2CastLocal = this->vecTbuf.template GetWithOffset<float>(this->dhBufSize, offsetDh);
+    this->wv2Local = this->vecTbuf.template GetWithOffset<DT>(this->dhBufSize, offsetDh + halfDhBufByte);
+    offsetDh += this->dhBufSize * FLOAT_DTYPE_SIZE;
+
 }
 
 
@@ -136,22 +152,23 @@ __aicore__ inline void GDRVec<DT>::Process( )
             preChunkNum += tmpChunkNum;
         }
         int32_t curChunkNum = (curSeqLen + BT - 1) / BT; // 当前seq的chunk数
-
-
-        // calc offset
+        
         uint64_t b = 0;
+        uint64_t dhBlockSize = this->K * this->V;
+        uint64_t gOffset = (b * this->H + h) * this->T;
+        printf(">>>gOffset is %lu\n", gOffset);
+        uint64_t gatedQOffset = cubeIdx * BT * this->K;
+        uint64_t qdoOffset = cubeIdx * this->K * this->V;
+        uint64_t wV2Offset = cubeIdx * this->K * this->V;
+        uint64_t dhOffset = (b * this->H + h)* this->chunkNum * dhBlockSize + // [B,H,NT,K,V]定位到[NT,K,V] 
+                            preChunkNum * dhBlockSize;   // 定位到當前seqence的起始chunk
+        // calc offset
         uint64_t qGmOffset = 0;
         uint64_t dvGmOffset = 0;
-
-        // uint64_t curSeqStartOffset = (b * params.H + h) * params.T * params.K + seqStartOffset * params.K;
-        // uint64_t dhPreBHOffset = (b * params.H + h) * params.chunkNum * params.K * params.V + 
-        //                         preChunkNum * params.K * params.V;
         uint64_t tOffset = seqStartOffset;
-        uint64_t gOffset = (b * this->H + h) * this->T + seqStartOffset;
         float gLast = 0.0;
         uint64_t bdvGmOffset = 0;
-
-        uint64_t gatedQOffset = cubeIdx * BT * this->K;
+        uint64_t curDhOffset = 0;
         if (this->subBlockIdx == 1) {
             gatedQOffset += this->halfBT * this->K;
         }
@@ -159,14 +176,18 @@ __aicore__ inline void GDRVec<DT>::Process( )
             if (this->subBlockIdx == 0) {
                 bdvGmOffset = cubeIdx * BT * this->V;
                 tOffset = seqStartOffset + chunkIdx * BT;
-                CopyIn(this->gLastCastLocal, this->gLastLocal, this->gGm[tOffset + this->halfBT], this->halfBT);
+                // printf("g offset is %lu\n",tOffset + this->halfBT);
+
+                CopyIn(this->gLastCastLocal, this->gLastLocal, this->gGm[gOffset + tOffset + this->halfBT], this->halfBT);
                 // PipeBarrier<PIPE_ALL>();
                 gLast = this->gLastCastLocal.GetValue(static_cast<uint64_t>(this->halfBT - 1));
             } else {
                 bdvGmOffset = cubeIdx * BT * this->V + this->halfBT * this->V;
                 tOffset = seqStartOffset + chunkIdx * BT + this->halfBT;
             }
-            CopyIn(this->gCastLocal, this->gLocal, this->gGm[tOffset], this->halfBT);
+            printf("g offset is %lu\n",tOffset);
+            CopyIn(this->gCastLocal, this->gLocal, this->gGm[gOffset + tOffset], this->halfBT);
+
             if (this->subBlockIdx == 1) {
                 gLast = this->gCastLocal.GetValue(this->halfBT - 1);
             }
@@ -180,8 +201,7 @@ __aicore__ inline void GDRVec<DT>::Process( )
             BlockMul(this->qCastLocal, this->gBCLocal, this->qCastLocal, 
                      this->halfBT, static_cast<uint32_t>(this->K));
             CopyOut(this->qLocal, this->qCastLocal, this->gatedQGm[gatedQOffset], this->qBufSize);
-            printf("gatedQOffset %lu\n", gatedQOffset + this->bdvWs);
-            CrossCoreSetFlag<0x2, PIPE_MTE3>(0x3); // 计算完一个chunk的gatedQ,通知cube可以开始计算gatedQ @ do
+            CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_GQ); // 计算完一个chunk的gatedQ,通知cube可以开始计算gatedQ @ do
 
             // 計算dv2 dv2 = bdv * exp(bg_last - bg) + dv[B,H,T,V]
             dvGmOffset = (b * this->H + h) * this->T * this->V + tOffset * this->V;
@@ -191,9 +211,6 @@ __aicore__ inline void GDRVec<DT>::Process( )
                 SetFlag<HardEvent::MTE2_MTE3>(EVENT_MTE2_MTE3);
                 WaitFlag<HardEvent::MTE2_MTE3>(EVENT_MTE2_MTE3);
                 CopyOut(this->vInLocal, this->dvCastLocal, this->dv2Gm[dvGmOffset], this->qBufSize, false);
-                
-                // SetFlag<HardEvent::MTE3_MTE2>(EVENT_MTE3_MTE2);
-                // WaitFlag<HardEvent::MTE3_MTE2>(EVENT_MTE3_MTE2);
             } else {
                 CopyIn(this->dvCastLocal, this->vInLocal, this->dvGm[dvGmOffset], this->dvBufSize);
                 // 64k
@@ -204,7 +221,7 @@ __aicore__ inline void GDRVec<DT>::Process( )
                 uint8_t repeatTimes = Ceil(this->halfBT, 8); // halfBT is 32 or 64
                 Brcb(this->gBrcbLocal, this->gCastLocal, repeatTimes, {1,8});
                 // halfBT * 32
-                CrossCoreWaitFlag(0x1); // cube计算完一个chunk的bdv,vec开始计算对应的dv2
+                CrossCoreWaitFlag(CROSS_CORE_C2V_BDV); // cube计算完一个chunk的bdv,vec开始计算对应的dv2
                 // printf("cubeIdx %u\n", cubeIdx);
                 // printf("bdvGmOffset %lu\n", bdvGmOffset);
                 CopyIn(this->bdvCastLocal, this->vInLocal, this->bdvGm[bdvGmOffset], this->dvBufSize);
@@ -215,8 +232,36 @@ __aicore__ inline void GDRVec<DT>::Process( )
                 
                 Add(this->bdvCastLocal, this->bdvCastLocal, this->dvCastLocal, this->qBufSize);
                 CopyOut(this->vInLocal, this->bdvCastLocal, this->dv2Gm[dvGmOffset], this->qBufSize);
-                CrossCoreSetFlag<0x2, PIPE_MTE3>(0x1); // 计算完一个chunk的dv2,通知cube可以开始计算w @ dv2 
             }
+            CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_DV2); // 计算完一个chunk的dv2,通知cube可以开始计算w @ dv2 
+            
+            
+            curDhOffset = dhOffset + chunkIdx * dhBlockSize + this->subBlockIdx * this->dhBufSize;
+            if (chunkIdx == curChunkNum -1) {
+                // 初始化全零 dh_chunkIdx
+                InitOutput<DT>(this->dhGm[curDhOffset], this->dhBufSize, 0); // 兩個vec核各初始化一半
+            } else {
+                CopyIn(this->bdhCastLocal, this->bdhLocal, this->dhGm[curDhOffset], this->dhBufSize);
+            }
+            // dh_updated = dh_i-1 * exp(bg_last) + term1*scale - term2
+            CrossCoreWaitFlag(CROSS_CORE_C2V_TERM1); 
+            {
+                if (this->subBlockIdx == 1) {
+                    qdoOffset +=  this->halfK * this->V;
+                }
+                CopyIn(this->qdoCastLocal, this->qdoLocal, this->qdoGm[qdoOffset], this->dhBufSize);
+                Muls(this->qdoCastLocal, this->qdoCastLocal, this->scale, this->dhBufSize);
+            }
+            // CrossCoreWaitFlag(CROSS_CORE_C2V_TERM2);
+            {
+                if (this->subBlockIdx == 1) {
+                    wV2Offset +=  this->halfK * this->V;
+                }
+                CopyIn(this->wv2CastLocal, this->wv2Local, this->wv2Gm[wV2Offset], this->dhBufSize);
+                Muls(this->wv2CastLocal, this->wv2CastLocal, static_cast<float>(-1.0), this->dhBufSize);
+            }  
+
+
             
             
 
