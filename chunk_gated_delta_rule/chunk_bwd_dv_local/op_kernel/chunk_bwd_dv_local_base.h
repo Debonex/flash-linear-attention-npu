@@ -48,6 +48,21 @@ __aicore__ inline void MTE2ToVSync()
     AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventIDMTE2ToV);
     AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventIDMTE2ToV);
 }
+
+__aicore__ inline void MTE3ToVSync()
+{
+    event_t eventIMTE3ToV = static_cast<event_t>(GetTPipePtr()->FetchEventID(AscendC::HardEvent::MTE3_V));
+    AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventIMTE3ToV);
+    AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(eventIMTE3ToV);
+}
+
+__aicore__ inline void VToMTE3Sync()
+{
+    event_t eventIDVToMTE3 = static_cast<event_t>(GetTPipePtr()->FetchEventID(AscendC::HardEvent::V_MTE3));
+    AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventIDVToMTE3);
+    AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventIDVToMTE3);
+}
+
 template <typename QKVT, typename GT>
 class ChunkBwdDvLocalBase {
 public:
@@ -245,7 +260,9 @@ __aicore__ inline void ChunkBwdDvLocalBase<QKVT, GT>::vectorProcess(int64_t chun
             int64_t outAddr =
                 curBatchId * h * t * chunkSize + hIndex * t * chunkSize + curTokenId * chunkSize + row * chunkSize;
             // AscendC::printf("[参数打印] outAddr = %d  \n", outAddr);
+            VToMTE3Sync();
             AscendC::DataCopy(workspace2Gm[outAddr], kqOutLocalTensor, chunkSize);
+            MTE3ToVSync();
             // AscendC::printf("[tensor 打印]  workspace2Gm \n");
             // AscendC::DumpTensor(workspace2Gm[curBatchId * h * t * chunkSize + hIndex * t * chunkSize +
             //                                  curTokenId * chunkSize + row * chunkSize],

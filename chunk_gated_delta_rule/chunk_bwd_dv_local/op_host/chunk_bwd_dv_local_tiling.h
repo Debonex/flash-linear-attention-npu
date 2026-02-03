@@ -35,8 +35,7 @@ TILING_DATA_FIELD_DEF(int64_t, tailCoreNum);
 TILING_DATA_FIELD_DEF(int64_t, totalCoreNum);
 TILING_DATA_FIELD_DEF(int64_t, chunkSize);
 TILING_DATA_FIELD_DEF(float, scale);
-TILING_DATA_FIELD_DEF(bool, isVariable);
-// todo 补齐到8B对齐
+TILING_DATA_FIELD_DEF(int32_t, isVariable);
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(ChunkBwdDvLocal, ChunkBwdDvLocalTilingData)
