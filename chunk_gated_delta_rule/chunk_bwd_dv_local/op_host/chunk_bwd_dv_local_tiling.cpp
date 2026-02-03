@@ -165,7 +165,7 @@ public:
     void InterKernelSplit(int64_t chunkNumForT, int64_t totalCoreNum)
     {
         int64_t allChunkNum = chunkNumForT * tiling_.get_b(); // b*t , h核内循环
-        std::cout << "allChunkNum = " << allChunkNum << std::endl;
+        // std::cout << "allChunkNum = " << allChunkNum << std::endl;
         int64_t chunkNumTailCore = allChunkNum / totalCoreNum;
         int64_t chunkNumPreCore = chunkNumTailCore + 1;
         int64_t preCoreNum = allChunkNum % totalCoreNum;

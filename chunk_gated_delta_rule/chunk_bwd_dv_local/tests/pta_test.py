@@ -269,18 +269,18 @@ def compare_tensors_by_ratio(tensor1, tensor2, ratio_threshold=0.01, verbose=Tru
 if __name__ == "__main__":
     torch.manual_seed(0)
     
-    B, H, T, K, V = 2, 1, 65, 128, 128
-    chunk_size=64
+    B, H, T, K, V = 8, 1, 128, 128, 128
+    chunk_size=128
     scale = 1.0
 
     q = create_tensor((B, H, T, K), dtype=torch.float16)
     k = create_tensor((B, H, T, K), dtype=torch.float16)
     d_o = create_tensor((B, H, T, V), dtype=torch.float16)
     g = create_tensor((B, H, T), dtype=torch.float16)
-    print("q =",q)
-    print("k =",k)
-    print("d_o =",d_o)
-    print("g =",g)
+    # print("q =",q)
+    # print("k =",k)
+    # print("d_o =",d_o)
+    # print("g =",g)
     upper_tri_matrix = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
     cu_seqlens = None
     # cu_seqlens = q.new_tensor([0, 64,128], dtype=torch.long)
@@ -288,7 +288,7 @@ if __name__ == "__main__":
 
     # dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
 
-    dv_golden =  chunk_bwd_dv_local_fix(q, k, d_o, g, scale, cu_seqlens, chunk_size)
+    # dv_golden =  chunk_bwd_dv_local_fix(q, k, d_o, g, scale, cu_seqlens, chunk_size)
 
 
     q_npu = q.npu()
@@ -302,10 +302,10 @@ if __name__ == "__main__":
 
     #dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=None, g_gamma=None, A=None,cu_seqlens=cu_seqlens_npu, chunk_indices = chunk_indices_npu, scale=scale, chunk_size =chunk_size)
     dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=upper_tri_matrix_npu, g_gamma=None, A=None,cu_seqlens=None, chunk_indices = None, scale=scale, chunk_size =chunk_size)
-    print(f"==== dv_golden.shape = {dv_golden.shape} ",dv_golden)
-    print(f"==== dv.shape = {dv.shape} ",dv)
+    # print(f"==== dv_golden.shape = {dv_golden.shape} ",dv_golden)
+    # print(f"==== dv.shape = {dv.shape} ",dv)
 
-    compare_tensors_by_ratio(dv_golden,dv.cpu())
+    # compare_tensors_by_ratio(dv_golden,dv.cpu())
 
 
     
