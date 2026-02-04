@@ -41,10 +41,6 @@ int64_t GetShapeSize(const std::vector<int64_t> &shape) {
 }
 
 void PrintOutResult(std::vector<int64_t> &shape, void **deviceAddr) {
-
-
-
-  
   auto size = GetShapeSize(shape);
   std::vector<short> resultData(size, 0);
   // std::cout << size << std::endl;
@@ -260,7 +256,7 @@ int main() {
   ret = aclnnPrepareWyReprBwdDaGetWorkspaceSize(k, v, beta, A, dw, du, g, nullptr, nullptr, 64, dA, &workspaceSize, &executor);
   CHECK_RET(
       ret == ACL_SUCCESS,
-      LOG_PRINT("aclnnPrepareWyReprBwddAGetWorkspaceSize failed. ERROR: %d\n", ret);
+      LOG_PRINT("aclnnPrepareWyReprBwdDaGetWorkspaceSize failed. ERROR: %d\n", ret);
       return ret);
 
   // 根据第一段接口计算出的workspaceSize申请device内存
@@ -275,7 +271,7 @@ int main() {
   // 调用aclnnPrepareWyReprBwddA第二段接口
   ret = aclnnPrepareWyReprBwdDa(workspaceAddr, workspaceSize, executor, stream);
   CHECK_RET(ret == ACL_SUCCESS,
-            LOG_PRINT("aclnnPrepareWyReprBwddA failed. ERROR: %d\n", ret);
+            LOG_PRINT("aclnnPrepareWyReprBwdDa failed. ERROR: %d\n", ret);
             return ret);
 
   // 4. （固定写法）同步等待任务执行结束
@@ -285,7 +281,7 @@ int main() {
             return ret);
 
   // 5.获取输出的值，将device侧内存上的结果拷贝至host侧，需要根据具体API的接口定义修改
-  // PrintOutResult(dkShape, &dkDeviceAddr);
+  PrintOutResult(dAShape, &dADeviceAddr);
   // PrintOutResultFp32(dbetaShape, &dbetaDeviceAddr);
   // 6. 释放aclTensor和aclScalar，需要根据具体API的接口定义修改
   // aclDestroyTensor(q);
