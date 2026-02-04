@@ -9,7 +9,7 @@
  */
 
 /*!
- * \file prepare_wy_repr_bwd_da.cpp
+ * \file prepare_wy_repr_bwd_da_def.cpp
  * \brief
  */
 
