@@ -118,13 +118,13 @@ template <typename kType, typename betaType>
 __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process() {
     ProcessVBeta();
     pipe->Reset();
-    AscendC::SyncAll<true>();
+    AscendC::SyncAll<false>();
     ProcessKBetaG();
     pipe->Reset();
-    AscendC::SyncAll<true>();
+    AscendC::SyncAll<false>();
     ProcessMDuDw();
     pipe->Reset();
-    AscendC::SyncAll<true>();
+    AscendC::SyncAll<false>();
     ProcessG();
     return;
 }
@@ -271,6 +271,7 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
 // v 和 beta 的计算
 template <typename kType, typename betaType>
 __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::ProcessVBeta() {
+    AscendC::printf("---hyh---274\n");
     uint32_t coreLoopsInB = CeilDiv(T, chunkSize);
     uint32_t coreLoops = B * coreLoopsInB;
     uint32_t coreIdx = GetBlockIdx() / GetSubBlockNum();
@@ -295,10 +296,11 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
         uint32_t bIdx = loopIdx / coreLoopsInB;
         uint32_t chunkIdx = loopIdx % coreLoopsInB;
         for (int h = 0; h < H; h++) {
+            AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+            AscendC::printf("---hyh--CrossCoreWaitFlag-299 AIC finish\n");
             for(uint32_t rowOffset = 0; rowOffset < chunkSize; rowOffset += rowNum) {
                 auto vOffset = ((bIdx * H + h) * T  + chunkIdx * chunkSize + rowOffset) * V;
                 auto betaOffset = (bIdx * H + h) * T  + chunkIdx * chunkSize + rowOffset;
-                // AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
                 //AscendC::printf("CrossCoreWaitFlag VOffset:%d, betaOffset:%d\n", VOffset, betaOffset);
                 //copyin
                 {
@@ -356,13 +358,21 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
                     // AscendC::printf("kOffset:%ld, K * rowNum:%d\n", kOffset, K * rowNum);
                 }
             }
-            // AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
+            // AscendC::printf("---hyh--CrossCoreSetFlag-361\n");
+            AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_3);
+            AscendC::printf("---hyh----CrossCoreSetFlag--363 AIV finish\n");
             //AscendC::printf("CrossCoreSetFlag\n");
         }
     }
     // DumpTensor(workSpaceTensor, 0,  8192);
-    // AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
-    // AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::printf("---hyh----CrossCoreSetFlag--1\n");
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::printf("---hyh----CrossCoreSetFlag--2\n");
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::printf("---hyh----CrossCoreSetFlag--3\n");
+    AscendC::CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_5);
+    AscendC::printf("---hyh----CrossCoreSetFlag--4\n");
     //AscendC::printf("CrossCoreWaitFlag\n");
     //AscendC::printf("CrossCoreWaitFlag\n");
     return;

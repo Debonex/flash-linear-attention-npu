@@ -169,8 +169,10 @@ public:
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
-            //AscendC::printf("CrossCoreSetFlag\n");
-            //AscendC::printf("CrossCoreSetFlag\n");
+            AscendC::printf("###yzq CrossCoreSetFlag ### 1\n");
+            AscendC::printf("###yzq CrossCoreSetFlag ### 2\n");
+            AscendC::printf("###yzq CrossCoreSetFlag ### 3\n");
+            AscendC::printf("###yzq CrossCoreSetFlag ### 4\n");
             uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
             uint32_t coreLoops = params.B * coreLoopsInB;
             BlockMmadDA2 blockMmadDA2(resource);
@@ -194,6 +196,7 @@ public:
                     auto tensorDA2 = tla::MakeTensor(gmDA2, params.layoutDA2, Arch::PositionGM{});
 
                     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+                    AscendC::printf("###yzq CrossCoreWaitFlag ### AIV finish\n");
                     // Make tiled views
                     auto tensorBlockDu = GetTile(tensorDu,
                                                 tla::MakeCoord(0, 0),
@@ -205,8 +208,9 @@ public:
                                                 tla::MakeCoord(0, 0),
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     // Compute block-scoped matrix multiply-add
-                    blockMmadDA2(tensorDu, tensorVb, tensorDA2, actualBlockShape);
+                    blockMmadDA2(tensorBlockDu, tensorBlockVb, tensorBlockDA2, actualBlockShape);
                     AscendC::CrossCoreSetFlag<0x2, PIPE_MTE2>(SYNC_AIC_AIV_FLAG_5);
+                    AscendC::printf("###yzq CrossCoreSetFlag ### AIC finish\n");
                 }
             }
         }
