@@ -53,5 +53,65 @@ __aicore__ inline void VToMTE3Sync()
     AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventIDVToMTE3);
 }
 
+struct IndexResult {
+    int64_t curTokenId;
+    int64_t chunkLen;
+
+    __aicore__ inline IndexResult(int64_t curTokenId, int64_t chunkLen) : curTokenId(curTokenId), chunkLen(chunkLen)
+    {
+    }
+};
+
+struct FixedLengthStrategy {
+    int64_t chunkSize;
+    int64_t lenT;
+    int64_t chunkNumForT;
+    int64_t chunkLenTail;
+    __aicore__ inline FixedLengthStrategy(int64_t chunkSize_, int64_t lenT_, int64_t chunkNumForT_)
+        : chunkSize(chunkSize_), lenT(lenT_), chunkNumForT(chunkNumForT_)
+    {
+        chunkLenTail = lenT - (chunkNumForT - 1) * chunkSize;
+    }
+
+    __aicore__ inline IndexResult calculate(int64_t loopIdx) const
+    {
+        int64_t curChunkId = loopIdx % chunkNumForT;
+        int64_t curTokenId = curChunkId * chunkSize;
+        int64_t chunkLen = curChunkId == chunkNumForT - 1 ? chunkLenTail : chunkSize;
+        return IndexResult(curTokenId, chunkLen);
+    }
+};
+
+struct VariableLengthStrategy {
+    int64_t chunkSize;
+    int64_t lenT;
+    int64_t chunkNumForT;
+    AscendC::GlobalTensor<int64_t> cuSeqlensGm;
+    AscendC::GlobalTensor<int64_t> chunkIndicesGm;
+    __aicore__ inline VariableLengthStrategy(int64_t chunkSize_, int64_t lenT_, int64_t chunkNumForT_, GM_ADDR cuSeqlens_,
+                                             GM_ADDR chunkIndices_)
+    {
+        chunkSize = chunkSize_;
+        lenT = lenT_;
+        chunkNumForT = chunkNumForT_;
+        cuSeqlensGm.SetGlobalBuffer((__gm__ int64_t *)cuSeqlens_);
+        chunkIndicesGm.SetGlobalBuffer((__gm__ int64_t *)chunkIndices_);
+    }
+
+    __aicore__ inline IndexResult calculate(int64_t loopIdx) const
+    {
+        int64_t curSeqId = chunkIndicesGm.GetValue(loopIdx * 2);
+        int64_t curSeqChunkId = chunkIndicesGm.GetValue(loopIdx * 2 + 1);
+        int64_t bos = cuSeqlensGm.GetValue(curSeqId);
+        int64_t eos = cuSeqlensGm.GetValue(curSeqId + 1);
+        int64_t curSeqT = eos - bos;
+        int64_t chunkStartToken = curSeqChunkId * chunkSize;
+        int64_t chunkEndToken = chunkStartToken + chunkSize;
+        chunkEndToken = chunkEndToken > curSeqT ? curSeqT : chunkEndToken;
+        return IndexResult(bos + chunkStartToken, chunkEndToken - chunkStartToken);
+    }
+};
+
+
 } // namespace GDN
 #endif // CHUNK_BWD_DV_LOCAL_COMMON_H

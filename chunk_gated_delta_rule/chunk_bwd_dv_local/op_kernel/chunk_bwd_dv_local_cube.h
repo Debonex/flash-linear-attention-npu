@@ -34,10 +34,15 @@
 #include "chunk_bwd_dv_local_common.h"
 namespace GDN {
 
-template <typename QKVT, typename GT>
+template <typename QKVT, typename GT, typename Strategy>
 class ChunkBwdDvLocalCube {
+private:
+    Strategy strategy;
+
 public:
-    __aicore__ inline ChunkBwdDvLocalCube(){};
+    __aicore__ inline ChunkBwdDvLocalCube(const Strategy &s) : strategy(s)
+    {
+    }
     __aicore__ inline void Process();
 
     __aicore__ inline void Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
@@ -48,42 +53,20 @@ public:
     AscendC::GlobalTensor<QKVT> dVGm;
     AscendC::GlobalTensor<QKVT> workspaceGm;
 
-    int64_t B;
     int64_t H;
     int64_t T;
     int64_t K;
     int64_t V;
-    int64_t chunkSize;
-    int64_t chunkNumForT;
-    int64_t chunkLenTail;
     int64_t coreLoops;
     int64_t blockNum;
     int64_t coreIdx;
-    // int64_t maxChunkIndexForT;
-    // int64_t chunkNumPreCore;
-    // int64_t chunkNumTailCore;
-    // int64_t preCoreNum;
-    // int64_t tailCoreNum;
-    // int64_t totalCoreNum;
-    // int64_t chunkSize;
-    // float scale;
-    // bool isVariable;
-    // int64_t batchCount;
-    // int64_t chunkNumCurCore;
-    // int64_t coreId;
-    // int64_t strideQK;
-    // int64_t strideDoDv;
-    // int64_t strideOut;
-
-    // AscendC::DataCopyExtParams copyParams{1, 0, 0, 0, 0};
-    // AscendC::DataCopyPadExtParams<QKVT> qkvPadParams{false, 0, 0, 0};
-    // AscendC::DataCopyPadExtParams<GT> gPadParams{false, 0, 0, 0};
 };
 
-template <typename QKVT, typename GT>
-__aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR cu_seqlens,
-                                                           GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace,
-                                                           const ChunkBwdDvLocalTilingData *__restrict tilingData)
+template <typename QKVT, typename GT, typename Strategy>
+__aicore__ inline void
+ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Init(GM_ADDR q, GM_ADDR k, GM_ADDR d_o, GM_ADDR cu_seqlens,
+                                              GM_ADDR chunk_indices, GM_ADDR d_v, GM_ADDR workspace,
+                                              const ChunkBwdDvLocalTilingData *__restrict tilingData)
 {
     qGm.SetGlobalBuffer((__gm__ QKVT *)q);
     kGm.SetGlobalBuffer((__gm__ QKVT *)k);
@@ -91,24 +74,17 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Init(GM_ADDR q, GM_ADDR k,
     dVGm.SetGlobalBuffer((__gm__ QKVT *)d_v);
     workspaceGm.SetGlobalBuffer((__gm__ QKVT *)workspace);
 
-    B = tilingData->b;
     H = tilingData->h;
     T = tilingData->t;
     K = tilingData->k;
     V = tilingData->v;
-    chunkSize = tilingData->chunkSize;
-    chunkNumForT = tilingData->chunkNumForT;
-    chunkLenTail = T - (chunkNumForT - 1) * chunkSize;
-    coreLoops = B * chunkNumForT;
+    coreLoops = tilingData->b * strategy.chunkNumForT;
     blockNum = static_cast<int64_t>(AscendC::GetBlockNum());
     coreIdx = static_cast<int64_t>(AscendC::GetBlockIdx());
-    // AscendC::printf("[参数打印] cube coreLoops = %d  \n", coreLoops);
-    // AscendC::printf("[参数打印] cube blockNum = %d  \n", blockNum);
-    // AscendC::printf("[参数打印] cube coreIdx = %d  \n", coreIdx);
 }
 
-template <typename QKVT, typename GT>
-__aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Process()
+template <typename QKVT, typename GT, typename Strategy>
+__aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT, Strategy>::Process()
 {
     using BlockScheduler = typename Catlass::Gemm::Block::GemmIdentityBlockSwizzle<3, 0>;
     using ArchTag = Catlass::Arch::AtlasA2;
@@ -130,29 +106,24 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Process()
                                                              ElementB, ElementC, void, TileCopy>;
 
         BlockMmad blockMmad(resource);
-        auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(chunkSize, K);
-        auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(K, chunkSize);
-        auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(chunkSize, chunkSize);
+        auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(strategy.chunkSize, K);
+        auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(K, strategy.chunkSize);
+        auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(strategy.chunkSize, strategy.chunkSize);
         for (int64_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += blockNum) {
-            int64_t curBatchId = static_cast<int64_t>(loopIdx) / chunkNumForT;
-            int64_t curChunkId = (static_cast<int64_t>(loopIdx) % chunkNumForT);
-            int64_t curTokenId = curChunkId * chunkSize;
-            int64_t chunkLen = curChunkId == chunkNumForT - 1 ? chunkLenTail : chunkSize;
-            // AscendC::printf("[参数打印] cube curBatchId = %d  \n", curBatchId);
-            // AscendC::printf("[参数打印] cube curChunkId = %d  \n", curChunkId);
-            // AscendC::printf("[参数打印] cube curTokenId = %d  \n", curTokenId);
-            // AscendC::printf("[参数打印] cube chunkLen = %d  \n", chunkLen);
-
-            Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(chunkLen), static_cast<uint32_t>(chunkLen),
-                                                static_cast<uint32_t>(K)};
+            int64_t curBatchId = static_cast<int64_t>(loopIdx) / strategy.chunkNumForT;
+            IndexResult indexResult = strategy.calculate(loopIdx);
+            Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(indexResult.chunkLen),
+                                                static_cast<uint32_t>(indexResult.chunkLen), static_cast<uint32_t>(K)};
             for (int hIndex = 0; hIndex < H; hIndex++) {
-                auto tensorA = tla::MakeTensor(kGm[curBatchId * H * T * K + hIndex * T * K + curTokenId * K], layoutA,
-                                               Catlass::Arch::PositionGM{});
-                auto tensorB = tla::MakeTensor(qGm[curBatchId * H * T * K + hIndex * T * K + curTokenId * K], layoutB,
-                                               Catlass::Arch::PositionGM{});
-                auto tensorC = tla::MakeTensor(
-                    workspaceGm[curBatchId * H * T * chunkSize + hIndex * T * chunkSize + curTokenId * chunkSize],
-                    layoutC, Catlass::Arch::PositionGM{});
+                auto tensorA =
+                    tla::MakeTensor(kGm[curBatchId * H * T * K + hIndex * T * K + indexResult.curTokenId * K], layoutA,
+                                    Catlass::Arch::PositionGM{});
+                auto tensorB =
+                    tla::MakeTensor(qGm[curBatchId * H * T * K + hIndex * T * K + indexResult.curTokenId * K], layoutB,
+                                    Catlass::Arch::PositionGM{});
+                auto tensorC = tla::MakeTensor(workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
+                                                           indexResult.curTokenId * strategy.chunkSize],
+                                               layoutC, Catlass::Arch::PositionGM{});
                 AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_1);
                 auto tensorBlockA =
                     GetTile(tensorA, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
@@ -162,8 +133,6 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Process()
                     GetTile(tensorC, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
 
                 blockMmad(tensorBlockA, tensorBlockB, tensorBlockC, actualBlockShape);
-                // AscendC::printf("[tensor 打印]  tensorBlockC \n");
-                // AscendC::DumpTensor(tensorBlockC.data(), 5, 128);
                 AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_3);
             }
         }
@@ -182,24 +151,24 @@ __aicore__ inline void ChunkBwdDvLocalCube<QKVT, GT>::Process()
 
         BlockMmad blockMmad(resource);
 
-        auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(chunkSize, chunkSize);
-        auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(chunkSize, V);
-        auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(chunkSize, V);
+        auto layoutA = tla::MakeLayout<ElementA, LayoutTagA>(strategy.chunkSize, strategy.chunkSize);
+        auto layoutB = tla::MakeLayout<ElementB, LayoutTagB>(strategy.chunkSize, V);
+        auto layoutC = tla::MakeLayout<ElementC, LayoutTagC>(strategy.chunkSize, V);
         for (int64_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += blockNum) {
-            int64_t curBatchId = static_cast<int64_t>(loopIdx) / chunkNumForT;
-            int64_t curChunkId = (static_cast<int64_t>(loopIdx) % chunkNumForT);
-            int64_t curTokenId = curChunkId * chunkSize;
-            int64_t chunkLen = curChunkId == chunkNumForT - 1 ? chunkLenTail : chunkSize;
-            Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(chunkLen), static_cast<uint32_t>(V),
-                                                static_cast<uint32_t>(chunkLen)};
+            int64_t curBatchId = static_cast<int64_t>(loopIdx) / strategy.chunkNumForT;
+            IndexResult indexResult = strategy.calculate(loopIdx);
+            Catlass::GemmCoord actualBlockShape{static_cast<uint32_t>(indexResult.chunkLen), static_cast<uint32_t>(V),
+                                                static_cast<uint32_t>(indexResult.chunkLen)};
             for (int hIndex = 0; hIndex < H; hIndex++) {
-                auto tensorA = tla::MakeTensor(
-                    workspaceGm[curBatchId * H * T * chunkSize + hIndex * T * chunkSize + curTokenId * chunkSize],
-                    layoutA, Catlass::Arch::PositionGM{});
-                auto tensorB = tla::MakeTensor(dOGm[curBatchId * H * T * V + hIndex * T * V + curTokenId * V], layoutB,
-                                               Catlass::Arch::PositionGM{});
-                auto tensorC = tla::MakeTensor(dVGm[curBatchId * H * T * V + hIndex * T * V + curTokenId * V], layoutC,
-                                               Catlass::Arch::PositionGM{});
+                auto tensorA = tla::MakeTensor(workspaceGm[curBatchId * H * T * strategy.chunkSize + hIndex * T * strategy.chunkSize +
+                                                           indexResult.curTokenId * strategy.chunkSize],
+                                               layoutA, Catlass::Arch::PositionGM{});
+                auto tensorB =
+                    tla::MakeTensor(dOGm[curBatchId * H * T * V + hIndex * T * V + indexResult.curTokenId * V], layoutB,
+                                    Catlass::Arch::PositionGM{});
+                auto tensorC =
+                    tla::MakeTensor(dVGm[curBatchId * H * T * V + hIndex * T * V + indexResult.curTokenId * V], layoutC,
+                                    Catlass::Arch::PositionGM{});
                 auto tensorBlockA =
                     GetTile(tensorA, tla::MakeCoord(0, 0), tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
                 auto tensorBlockB =
