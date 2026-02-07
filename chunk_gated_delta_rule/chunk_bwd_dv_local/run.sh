@@ -1,5 +1,5 @@
 clear
-export ASCEND_RT_VISIBLE_DEVICES=6
+export ASCEND_RT_VISIBLE_DEVICES=5
 op=chunk_bwd_dv_local
 
 source /data/zs/Ascend/ascend-toolkit/set_env.sh

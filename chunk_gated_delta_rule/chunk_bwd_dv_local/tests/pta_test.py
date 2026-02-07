@@ -17,8 +17,8 @@ def prepare_chunk_indices(
     chunk_size: int
 ) -> torch.LongTensor:
     indices = torch.cat([torch.arange(n) for n in cdiv(prepare_lens(cu_seqlens), chunk_size).tolist()])
-    print("cu_seqlens is ", cu_seqlens)
-    print("indices is ", indices)
+    # print("cu_seqlens is ", cu_seqlens)
+    # print("indices is ", indices)
 
     return torch.stack([indices.eq(0).cumsum(0) - 1, indices], 1).to(cu_seqlens)
 
@@ -266,10 +266,47 @@ def compare_tensors_by_ratio(tensor1, tensor2, ratio_threshold=0.01, verbose=Tru
         
         return False
 
-if __name__ == "__main__":
-    torch.manual_seed(0)
+def test_variable():
+    B, H, T, K, V = 1, 2, 65, 128, 128
+    chunk_size=64
+    scale = 1.0
+
+    q = create_tensor((B, H, T, K), dtype=torch.float16)
+    print(f"==== q.shape = {q.shape} ")
+    k = create_tensor((B, H, T, K), dtype=torch.float16)
+    print(f"==== k.shape = {k.shape} ")
+    d_o = create_tensor((B, H, T, V), dtype=torch.float16)
+    print(f"==== d_o.shape = {d_o.shape} ")
+    g = create_tensor((B, H, T), dtype=torch.float16)
+    print(f"==== g.shape = {g.shape} ")
+    # print("q =",q)
+    # print("k =",k)
+    # print("d_o =",d_o)
+    # print("g =",g)
+    upper_tri_matrix = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
+    # print(f"==== upper_tri_matrix.shape = {upper_tri_matrix.shape} ")
     
-    B, H, T, K, V = 2, 2, 65, 128, 128
+    cu_seqlens = q.new_tensor([0, 64,65], dtype=torch.long)
+    chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
+    print(f"==== chunk_indices.shape = {chunk_indices.shape} ",chunk_indices)
+
+    dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
+
+    q_npu = q.npu()
+    k_npu = k.npu()
+    d_o_npu = d_o.npu()
+    g_npu = g.npu()
+    upper_tri_matrix_npu = upper_tri_matrix.npu()
+    if cu_seqlens is not None:
+        cu_seqlens_npu = cu_seqlens.npu()
+        chunk_indices_npu = chunk_indices.npu()
+
+    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=None, g_gamma=None, A=None,cu_seqlens=cu_seqlens_npu, chunk_indices = chunk_indices_npu, scale=scale, chunk_size =chunk_size)
+
+    compare_tensors_by_ratio(dv_golden,dv.cpu())
+
+def test_fix():
+    B, H, T, K, V = 2, 2, 64, 128, 128
     chunk_size=64
     scale = 1.0
 
@@ -288,11 +325,6 @@ if __name__ == "__main__":
     upper_tri_matrix = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool))
     # print(f"==== upper_tri_matrix.shape = {upper_tri_matrix.shape} ")
     cu_seqlens = None
-    # cu_seqlens = q.new_tensor([0, 64,128], dtype=torch.long)
-    # chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
-
-    # dv_golden = chunk_bwd_dv_local_variable(q, k, d_o, g, scale, cu_seqlens, chunk_size)
-
     dv_golden =  chunk_bwd_dv_local_fix(q, k, d_o, g, scale, cu_seqlens, chunk_size)
     # print(f"==== dv_golden.shape = {dv_golden.shape} ",dv_golden)
 
@@ -301,17 +333,16 @@ if __name__ == "__main__":
     d_o_npu = d_o.npu()
     g_npu = g.npu()
     upper_tri_matrix_npu = upper_tri_matrix.npu()
-    if cu_seqlens is not None:
-        cu_seqlens_npu = cu_seqlens.npu()
-        chunk_indices_npu = chunk_indices.npu()
 
-    #dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=None, g_gamma=None, A=None,cu_seqlens=cu_seqlens_npu, chunk_indices = chunk_indices_npu, scale=scale, chunk_size =chunk_size)
-    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=upper_tri_matrix_npu, g_gamma=None, A=None,cu_seqlens=None, chunk_indices = None, scale=scale, chunk_size =chunk_size)
-    # print(f"==== dv_golden.shape = {dv_golden.shape} ",dv_golden)
-    # print(f"==== dv.shape = {dv.shape} ",dv)
+    dv = torch_npu.npu_chunk_bwd_dv_local(q_npu, k_npu, d_o_npu, g_npu,upper_tri_matrix=None, g_gamma=None, A=None,cu_seqlens=None, chunk_indices = None, scale=scale, chunk_size =chunk_size)
 
     compare_tensors_by_ratio(dv_golden,dv.cpu())
 
+if __name__ == "__main__":
+    torch.manual_seed(0)
+    
+    test_variable()
+    test_fix()
 
     
 
