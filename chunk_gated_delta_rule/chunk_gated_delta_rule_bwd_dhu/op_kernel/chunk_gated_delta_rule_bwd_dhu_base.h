@@ -42,7 +42,7 @@ constexpr uint8_t CROSS_CORE_C2V_TERM2 = 4;  // cube算完dh_term2,通知vec搬�
 constexpr uint8_t CROSS_CORE_V2C_BDH = 5;  // vec更新完dh,通知cube進行下個chunk的bdv計算
 
 
-template <typename DT>
+template <typename DT, typename GT>
 class GDRBase {
 public:
     __aicore__ inline GDRBase(){};
@@ -57,7 +57,7 @@ protected:
     
     // inputGm
     GlobalTensor<DT> qGm;
-    GlobalTensor<DTYPE_G> gGm;
+    GlobalTensor<GT> gGm;
     GlobalTensor<DT> dvGm;
     GlobalTensor<int64_t> cuSeqlensGm;
     // output gm, also used as input
@@ -72,8 +72,8 @@ protected:
     // calc gated q
     LocalTensor<DT> qLocal; // [BT/2,K]
     LocalTensor<float> qCastLocal;
-    LocalTensor<DTYPE_G> gLocal; // [BT/2,]
-    LocalTensor<DTYPE_G> gLastLocal;
+    LocalTensor<GT> gLocal; // [BT/2,]
+    LocalTensor<GT> gLastLocal;
     LocalTensor<float> gCastLocal;
     LocalTensor<float> gLastCastLocal;
     LocalTensor<float> gBCLocal;
@@ -83,8 +83,6 @@ protected:
     LocalTensor<float> gFatorLocal;
     
     // update dv2
-    // LocalTensor<DT> dvLocal; // [BT/2,V]
-    // LocalTensor<DT> bdvLocal; // [BT/2,V]
     LocalTensor<DT> vInLocal; // [BT/2,V]
 
     LocalTensor<float> dvCastLocal;
@@ -126,12 +124,14 @@ protected:
     uint32_t subBlockIdx = 0;
     uint32_t halfBT = 0;
     uint32_t halfK = 0;
-
-
+    uint32_t curBT = 0;
+    uint32_t curCalcBT = 0;
+    uint32_t curCalcTK = 0;
+    uint32_t curCalcTV = 0;
 };
 
-template <typename DT>
-__aicore__ inline void GDRBase<DT>::InitTilingData(const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData)
+template <typename DT, typename GT>
+__aicore__ inline void GDRBase<DT, GT>::InitTilingData(const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData)
 {
     this->B = tilingData.B;
     this->H = tilingData.H;
@@ -161,8 +161,8 @@ __aicore__ inline void GDRBase<DT>::InitTilingData(const ChunkGatedDeltaRuleBwdD
 
 }
 
-template <typename DT>
-__aicore__ inline void GDRBase<DT>::BroadCastAndMul(const LocalTensor<float>& broadCastSrcLocal,  const LocalTensor<float>& broadCastDstLocal, 
+template <typename DT, typename GT>
+__aicore__ inline void GDRBase<DT, GT>::BroadCastAndMul(const LocalTensor<float>& broadCastSrcLocal,  const LocalTensor<float>& broadCastDstLocal, 
                                                     const LocalTensor<float>& mulSrcLocal, const uint32_t dim0, const uint32_t dim1) 
 {
     const uint32_t dstShape[] = {dim0, dim1};
@@ -183,6 +183,10 @@ __aicore__ inline void CopyIn(const LocalTensor<CAST_DT>& castLocal, const Local
     PipeBarrier<PIPE_MTE2>();
     if (len % BLOCK_SIZE == 0) {
         DataCopy(srcLocal, srcGM, len);
+    } else {
+        DataCopyExtParams dataCopyExtParams{1, static_cast<uint32_t>(len * sizeof(SRC_DT)), 0, 0, 0};
+        DataCopyPadExtParams<SRC_DT> padParams{false, 0, 0, 0};
+        DataCopyPad(srcLocal, srcGM, dataCopyExtParams, padParams);
     }
 
     SetFlag<HardEvent::MTE2_V>(EVENT_MTE2_V);
@@ -206,21 +210,24 @@ __aicore__ inline void CopyOut(const LocalTensor<CAST_DT>& castLocal, const Loca
 
     if (len % BLOCK_SIZE == 0) {
         DataCopy(dstGM, castLocal, len);
+    } else {
+        DataCopyExtParams dataCopyExtParams{1, static_cast<uint32_t>(len * sizeof(CAST_DT)), 0, 0, 0};
+        DataCopyPad(dstGM, castLocal, dataCopyExtParams);
     }
 
     SetFlag<HardEvent::MTE3_V>(EVENT_MTE3_V);
     WaitFlag<HardEvent::MTE3_V>(EVENT_MTE3_V);
 }
 
-template <typename DT>
-__aicore__ inline void BlockMul(const LocalTensor<DT>& src0Local, const LocalTensor<DT>& src1Local,
-                                const LocalTensor<DT>& dstLocal, const uint32_t dim0, const uint32_t dim1) 
+template <typename T>
+__aicore__ inline void BlockMul(const LocalTensor<T>& src0Local, const LocalTensor<T>& src1Local,
+                                const LocalTensor<T>& dstLocal, const uint32_t dim0, const uint32_t dim1) 
 {
     // src0Local[dim0, dim1], src1Local[dim0, oneBlockSize]
     uint32_t offset = 0;
     uint32_t tailNum = dim1 % FP32_PER_REPEAT;
 
-    uint8_t repeatStride = dim1 * sizeof(DT) / BLOCK_SIZE; // 一行有幾個block
+    uint8_t repeatStride = dim1 * sizeof(T) / BLOCK_SIZE; // 一行有幾個block
     uint8_t dstBlkStride = 1;
     uint8_t src0BlkStride = 1;
     uint8_t src1BlkStride = 0;
