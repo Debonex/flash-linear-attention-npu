@@ -23,12 +23,6 @@
 #include "kernel_operator.h"
 #include "lib/matmul_intf.h"
 
-#if defined(ORIG_DTYPE_Q) && defined(DT_FLOAT16) && ORIG_DTYPE_Q == DT_FLOAT16
-    #define INPUT_DTYPE half
-#elif defined(ORIG_DTYPE_Q) && defined(DT_BF16) && ORIG_DTYPE_Q == DT_BF16
-    #define INPUT_DTYPE bfloat16_t
-#endif
-
 using namespace AscendC;
 extern "C" __global__ __aicore__ void chunk_gated_delta_rule_bwd_dhu(
     GM_ADDR q, GM_ADDR k, GM_ADDR w, GM_ADDR d_o, GM_ADDR dv, GM_ADDR g, GM_ADDR gk, GM_ADDR h0, GM_ADDR dht, 
@@ -44,12 +38,12 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_bwd_dhu(
     
     if (TILING_KEY_IS(1)) {
         if ASCEND_IS_AIC {
-            GDRCube<INPUT_DTYPE> cubeOp(k, w, d_o, dh, dv2, cu_seqlens, chunk_indices, workspace);
+            GDRCube<DTYPE_Q, DTYPE_G> cubeOp(k, w, d_o, dh, dv2, cu_seqlens, chunk_indices, workspace);
             cubeOp.Init(tilingData);
             cubeOp.Process();
         }
         if ASCEND_IS_AIV {
-            ChunkGDRBwdDhu::GDRVec<INPUT_DTYPE> op;
+            ChunkGDRBwdDhu::GDRVec<DTYPE_Q, DTYPE_G> op;
             op.Init(q, k, w, d_o, dv, g, cu_seqlens, dv2, dh, workspace, tilingData);
             op.Process();
         }

@@ -584,8 +584,8 @@ private:
 
 
 
-template <typename DT>
-class GDRCube : public GDRBase<DT>
+template <typename DT, typename GT>
+class GDRCube : public GDRBase<DT, GT>
 {
 public:
     __aicore__ inline GDRCube(GM_ADDR k_, GM_ADDR w_, GM_ADDR dO_, GM_ADDR dh_, GM_ADDR dv2_, GM_ADDR cu_seqlens_, 
@@ -605,8 +605,8 @@ private:
 
 }; // class GDRCube
 
-template <typename DT>
-__aicore__ inline GDRCube<DT>::GDRCube(GM_ADDR k_, GM_ADDR w_, GM_ADDR dO_, GM_ADDR dh_, GM_ADDR dv2_, GM_ADDR cu_seqlens_, 
+template <typename DT, typename GT>
+__aicore__ inline GDRCube<DT, GT>::GDRCube(GM_ADDR k_, GM_ADDR w_, GM_ADDR dO_, GM_ADDR dh_, GM_ADDR dv2_, GM_ADDR cu_seqlens_, 
                                        GM_ADDR chunk_indices_, GM_ADDR workspace_)
 :
     k(k_),
@@ -619,15 +619,15 @@ __aicore__ inline GDRCube<DT>::GDRCube(GM_ADDR k_, GM_ADDR w_, GM_ADDR dO_, GM_A
     workspace(workspace_)
     {};
 
-template <typename DT>
-__aicore__ inline void GDRCube<DT>::Init(const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData)
+template <typename DT, typename GT>
+__aicore__ inline void GDRCube<DT, GT>::Init(const ChunkGatedDeltaRuleBwdDhuTilingData& tilingData)
 {
-    GDRBase<DT>::InitTilingData(tilingData);
+    GDRBase<DT, GT>::InitTilingData(tilingData);
     return;
 }
 
-template <typename DT>
-__aicore__ inline void GDRCube<DT>::Process()
+template <typename DT, typename GT>
+__aicore__ inline void GDRCube<DT, GT>::Process()
 {
     uint64_t bdvWorkspaceOffset = 0;
     uint64_t gQWorkspaceOffset = this->bdvWs;
