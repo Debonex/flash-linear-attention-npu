@@ -20,6 +20,10 @@ constexpr uint64_t SYNC_AIC_AIV_FLAG_5 = 5;
 constexpr uint64_t ONE_BLOCK_32 = 32;
 constexpr uint32_t FP32_PER_BLOCK_8 = 8;
 constexpr uint32_t FP32_PER_REPEAT_64 = 64;
+constexpr uint32_t BIT_NUM_FOR_UINT8 = 8;
+constexpr uint32_t SIZE_FLOAT = 4;
+constexpr uint32_t BLOCK_SIZE = 32;
+constexpr uint32_t CAL_NUM_FLOAT = 64; // API一次能处理256B，能计算64个float元素
 
 // __aicore__ void inline GetChunkOffset(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, uint64_t B, uint64_t H, uint64_t T,
 //                                       uint64_t chunkSize, uint32_t loopIdx, uint32_t &bos, uint32_t &eos)

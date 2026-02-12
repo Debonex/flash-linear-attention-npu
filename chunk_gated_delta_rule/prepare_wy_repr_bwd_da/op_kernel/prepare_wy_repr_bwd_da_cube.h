@@ -177,7 +177,7 @@ public:
                 uint32_t chunkIdx = loopIdx % coreLoopsInB;
                 GemmCoord blockCoord{0, 0, 0};
                 GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.K)};
-                // AscendC::printf("blockCoord.m(%d)  blockCoord.n(%d)\n",blockCoord.m(), blockCoord.n());
+                AscendC::printf("actualBlockShape.m(%d)  actualBlockShape.n(%d)\n",actualBlockShape.m(), actualBlockShape.n());
                 for (int h = 0; h < params.H; h++) {
                     // Represent the full gm
                     AscendC::GlobalTensor<ElementDw> gmDw;
@@ -186,7 +186,6 @@ public:
                     gmKbg.SetGlobalBuffer((__gm__ ElementKbg *)params.ptrKbg + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.K);
                     AscendC::GlobalTensor<ElementDA1> gmDA1;
                     gmDA1.SetGlobalBuffer((__gm__ ElementDA1 *)params.ptrDA1 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
-
                     // Represent the full tensors
                     auto tensorDw = tla::MakeTensor(gmDw, params.layoutDw, Arch::PositionGM{});
                     auto tensorKbg = tla::MakeTensor(gmKbg, params.layoutKbg, Arch::PositionGM{});
@@ -303,59 +302,59 @@ public:
                                                 tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
                     // Compute block-scoped matrix multiply-add
-                    blockMmadDA5(tensorBlockDA4, tensorBlockAT, tensorBlockDA5, actualBlockShape);
+                    // blockMmadDA5(tensorBlockDA4, tensorBlockAT, tensorBlockDA5, actualBlockShape);
                     // 注意：这里可能需要设置计算完成的标志
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
                 }
             }
         }
-        AscendC::SyncAll<false>();
-        {   // 计算第四个矩阵乘 dA_6 = A.T @ dA_5
-            uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
-            uint32_t coreLoops = params.B * coreLoopsInB;
-            BlockMmadDA6 blockMmadDA6(resource);
-            for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
-                uint32_t bIdx = loopIdx / coreLoopsInB;
-                uint32_t chunkIdx = loopIdx % coreLoopsInB;
-                GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT)};
-                for (int h = 0; h < params.H; h++) {
-                    // Represent the full gm
-                    AscendC::GlobalTensor<ElementAT> gmAT;
-                    gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
-                    AscendC::GlobalTensor<ElementDA5> gmDA5;
-                    gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
-                    AscendC::GlobalTensor<ElementDA6> gmDA6;
-                    gmDA6.SetGlobalBuffer((__gm__ ElementDA6 *)params.ptrDA6 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+        // AscendC::SyncAll<false>();
+        // {   // 计算第四个矩阵乘 dA_6 = A.T @ dA_5
+        //     uint32_t coreLoopsInB = CeilDiv(params.T, params.BT);
+        //     uint32_t coreLoops = params.B * coreLoopsInB;
+        //     BlockMmadDA6 blockMmadDA6(resource);
+        //     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += AscendC::GetBlockNum()) {
+        //         uint32_t bIdx = loopIdx / coreLoopsInB;
+        //         uint32_t chunkIdx = loopIdx % coreLoopsInB;
+        //         GemmCoord actualBlockShape{static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT), static_cast<uint32_t>(params.BT)};
+        //         for (int h = 0; h < params.H; h++) {
+        //             // Represent the full gm
+        //             AscendC::GlobalTensor<ElementAT> gmAT;
+        //             gmAT.SetGlobalBuffer((__gm__ ElementAT *)params.ptrAT + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+        //             AscendC::GlobalTensor<ElementDA5> gmDA5;
+        //             gmDA5.SetGlobalBuffer((__gm__ ElementDA5 *)params.ptrDA5 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
+        //             AscendC::GlobalTensor<ElementDA6> gmDA6;
+        //             gmDA6.SetGlobalBuffer((__gm__ ElementDA6 *)params.ptrDA6 + ((bIdx * params.H + h) * params.T + chunkIdx * params.BT) * params.BT);
 
-                    // Represent the full tensors
-                    auto tensorAT = tla::MakeTensor(gmAT, params.layoutAT, Arch::PositionGM{});
-                    auto tensorDA5 = tla::MakeTensor(gmDA5, params.layoutDA5, Arch::PositionGM{});
-                    auto tensorDA6 = tla::MakeTensor(gmDA6, params.layoutDA6, Arch::PositionGM{});
+        //             // Represent the full tensors
+        //             auto tensorAT = tla::MakeTensor(gmAT, params.layoutAT, Arch::PositionGM{});
+        //             auto tensorDA5 = tla::MakeTensor(gmDA5, params.layoutDA5, Arch::PositionGM{});
+        //             auto tensorDA6 = tla::MakeTensor(gmDA6, params.layoutDA6, Arch::PositionGM{});
 
-                    AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-                    // Make tiled views
-                    auto tensorBlockAT = GetTile(tensorAT,
-                                                tla::MakeCoord(0, 0),
-                                                tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
-                    auto tensorBlockDA5 = GetTile(tensorDA5,
-                                                tla::MakeCoord(0, 0),
-                                                tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
-                    auto tensorBlockDA6 = GetTile(tensorDA6,
-                                                tla::MakeCoord(0, 0),
-                                                tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
+        //             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+        //             // Make tiled views
+        //             auto tensorBlockAT = GetTile(tensorAT,
+        //                                         tla::MakeCoord(0, 0),
+        //                                         tla::MakeShape(actualBlockShape.m(), actualBlockShape.k()));
+        //             auto tensorBlockDA5 = GetTile(tensorDA5,
+        //                                         tla::MakeCoord(0, 0),
+        //                                         tla::MakeShape(actualBlockShape.k(), actualBlockShape.n()));
+        //             auto tensorBlockDA6 = GetTile(tensorDA6,
+        //                                         tla::MakeCoord(0, 0),
+        //                                         tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
-                    // Compute block-scoped matrix multiply-add
-                    blockMmadDA6(tensorBlockAT, tensorBlockDA5, tensorBlockDA6, actualBlockShape);
+        //             // Compute block-scoped matrix multiply-add
+        //             blockMmadDA6(tensorBlockAT, tensorBlockDA5, tensorBlockDA6, actualBlockShape);
                     
-                    // 注意：这里可能需要设置计算完成的标志
-                    AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
-                }
-            }
-            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
-        }
+        //             // 注意：这里可能需要设置计算完成的标志
+        //             AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_5);
+        //         }
+        //     }
+        //     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+        //     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+        //     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+        //     AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_3);
+        // }
     }
 };
 }
@@ -427,11 +426,11 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
     using LayoutTagDw = layout::RowMajor;
     LayoutTagDw tagDw = LayoutTagDw::MakeLayout<kType>(BT, K);
     using LayoutTagKbg = layout::ColumnMajor;
-    LayoutTagKbg tagKbg = LayoutTagKbg::MakeLayout<kType>(BT, K);
+    LayoutTagKbg tagKbg = LayoutTagKbg::MakeLayout<kType>(K, BT);
     using LayoutTagDu = layout::RowMajor;
     LayoutTagDu tagDu = LayoutTagDu::MakeLayout<kType>(BT, V);
     using LayoutTagVb = layout::ColumnMajor;
-    LayoutTagVb tagVb = LayoutTagVb::MakeLayout<kType>(BT, V);
+    LayoutTagVb tagVb = LayoutTagVb::MakeLayout<kType>(V, BT);
     using LayoutTagAT = layout::ColumnMajor;
     LayoutTagAT tagAT = LayoutTagAT::MakeLayout<kType>(BT, BT);
 
@@ -503,7 +502,7 @@ __aicore__ void inline PrepareWyReprBwdDAProcess<kType, betaType>::Process() {
     MatmulKernel kernel;
 
     // ptrVb/ptrKbg 必须指向 Vector 写入的 workspace 区域：vb / kbg=workSpace2Tensor(基址+B*H*T*BT 元素)
-    GM_ADDR ptrVb = reinterpret_cast<GM_ADDR>(reinterpret_cast<uint64_t>(workspace) + static_cast<uint64_t>(B * H * T * BT) * sizeof(kType));
+    GM_ADDR ptrVb = reinterpret_cast<GM_ADDR>(reinterpret_cast<__gm__ kType*>(workspace) + (B * H * T * BT));
     GM_ADDR ptrKbg = ptrVb;
     GM_ADDR ptrDA1 = dA;
     GM_ADDR ptrDA2 = workspace;

@@ -253,7 +253,7 @@ int main() {
   aclOpExecutor *executor;
 
   // 调用aclnnPrepareWyReprBwddA第一段接口
-  ret = aclnnPrepareWyReprBwdDaGetWorkspaceSize(k, v, beta, A, dw, du, g, nullptr, nullptr, 64, dA, &workspaceSize, &executor);
+  ret = aclnnPrepareWyReprBwdDaGetWorkspaceSize(k, v, beta, A, dw, du, g, nullptr, nullptr, nullptr, 64, dA, &workspaceSize, &executor);
   CHECK_RET(
       ret == ACL_SUCCESS,
       LOG_PRINT("aclnnPrepareWyReprBwdDaGetWorkspaceSize failed. ERROR: %d\n", ret);
