@@ -128,9 +128,9 @@ def compute_dA_cpu(
         o_t = i_t * BT + torch.arange(0, BT, dtype=torch.int32)
         m_t = o_t < T
         m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
-        print("==== m_A.shape = ", m_A.shape)
-        print("==== m_A ====")
-        print(m_A)
+        # print("==== m_A.shape = ", m_A.shape)
+        # print("==== m_A ====")
+        # print(m_A)
 
         # 全1因果掩码m_A
         # m_A = torch.triu(torch.ones(BT, BT, device="cpu"), diagonal=1).bool() # [BT, BT]
@@ -212,6 +212,13 @@ def test_variable():
     V = 128;
     BT=chunk_size=64
 
+    # B = 1;
+    # T = 32768;
+    # H = 32;
+    # K = 128;
+    # V = 128;
+    # BT=chunk_size=64
+
     k = create_tensor((B, H, T, K), dtype=torch.float16)
     print(f"==== k.shape = {k.shape} ")
     v = create_tensor((B, H, T, V), dtype=torch.float16)
@@ -258,6 +265,13 @@ def test_fix():
     K = 128;
     V = 128;
     BT=chunk_size=64
+
+    # B = 1;
+    # T = 32768;
+    # H = 32;
+    # K = 128;
+    # V = 128;
+    # BT=chunk_size=64
 
     k = create_tensor((B, H, T, K), dtype=torch.float16)
     print(f"==== k.shape = {k.shape} ")

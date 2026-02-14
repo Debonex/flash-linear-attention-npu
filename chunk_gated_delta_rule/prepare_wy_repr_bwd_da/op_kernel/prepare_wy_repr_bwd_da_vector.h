@@ -36,6 +36,12 @@ private:
     uint64_t K = 128;
     uint64_t V = 128;
     uint64_t BT = 64;
+    // uint64_t B = 1;
+    // uint64_t T = 32768;
+    // uint64_t H = 32;
+    // uint64_t K = 128;
+    // uint64_t V = 128;
+    // uint64_t BT = 64;
 
     //这些会包在tiling data 里
     uint64_t dkRowNum = 32;

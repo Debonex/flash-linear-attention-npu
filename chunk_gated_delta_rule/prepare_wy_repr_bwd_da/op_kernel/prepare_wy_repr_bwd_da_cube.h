@@ -368,6 +368,12 @@ private:
     uint64_t K = 128;
     uint64_t V = 128;
     uint64_t BT = 64;
+    // uint64_t B = 1;
+    // uint64_t T = 32768;
+    // uint64_t H = 32;
+    // uint64_t K = 128;
+    // uint64_t V = 128;
+    // uint64_t BT = 64;
     GM_ADDR k;
     GM_ADDR v;
     GM_ADDR beta;
