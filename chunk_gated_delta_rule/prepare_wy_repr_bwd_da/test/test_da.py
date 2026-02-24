@@ -132,9 +132,6 @@ def compute_dA_cpu(
         print("==== m_A ====")
         print(m_A)
 
-        # 全1因果掩码m_A
-        # m_A = torch.triu(torch.ones(BT, BT, device="cpu"), diagonal=1).bool() # [BT, BT]
-
         for i_b in range(B):
         # 遍历所有batch
             if IS_VARLEN == False:
@@ -197,7 +194,152 @@ def compute_dA_cpu(
                 b_dA = torch.where(m_A, b_dA_7.to(torch.float32), 0.0) # [BT, BT]
 
                 # 存储结果
-                dA[i_b, i_h, bos + idx * BT : bos + idx * BT + BT, :] = b_dA.to(torch.float16)
+                dA[i_b, i_h, bos + idx * BT : bos + idx * BT + BT, :] = b_dA_1.to(torch.float16)
+
+    return dA
+
+def compute_dA_cpu_var(
+    A: torch.Tensor,      # [B, H, T, BT] - 每个chunk的A值
+    dw: torch.Tensor,     # [B, H, T, K]
+    g: torch.Tensor,     # [B, H, T]
+    beta: torch.Tensor,   # [B, H, T] - beta参数
+    k: torch.Tensor,     # [B, H, T, K]
+    v: torch.Tensor,      # [B, H, T, V]
+    du: torch.Tensor,     # [B, H, T, V]
+    chunk_indices: torch.Tensor,  # [NT, 2] 包含 (seq_idx, chunk_idx) 索引
+    cu_seqlens: torch.Tensor,  # [B+1] 累积序列长度
+    B: int,
+    H: int,
+    T: int,
+    D: int,
+    BT: int,  # BT
+    NT: int,  # T / BT
+) -> torch.Tensor:
+    """
+    CPU golden implementation for dv computation (变长序列)
+    A的形状为 [B, H, T, BT]
+    算法:
+    1. 对于每个chunk (由chunk_indices指定)
+    2. 获取对应的seq_idx, chunk_idx
+    3. 计算该chunk内的dA
+    """
+    dA = torch.zeros_like(A)
+    IS_VARLEN = cu_seqlens is not None
+    for idx in range(NT):
+        if IS_VARLEN:
+            # 从chunk_indices获取batch索引和chunk索引
+            # chunk_indices形状: [NT, 2]
+            seq_idx = chunk_indices[idx, 0].item()   # 等价于序列号i_n = tl.load(chunk_indices + idx * 2).to(tl.int32)
+            chunk_idx = chunk_indices[idx, 1].item()
+            # 获取当前序列的边界
+            bos = cu_seqlens[seq_idx].item()      # 序列开始位置 tl.load(cu_seqlens + i_n).to(tl.int32)
+            eos = cu_seqlens[seq_idx + 1].item()  # 序列结束位置 tl.load(cu_seqlens + i_n + 1).to(tl.int32)
+            seq_len = eos - bos                     # 实际序列长度
+            i_t = chunk_idx
+            T = seq_len
+            chunk_start_token = i_t * BT # 当前chunk在序列内的起始token位置
+            chunk_end_token = min(chunk_start_token + BT, T) # 结束位置，不超过序列真实长度
+            chunk_len = chunk_end_token - chunk_start_token # 当前chunk的有效token数
+            if chunk_len <= 0:
+                continue
+            global_start = bos + chunk_start_token # 当前chunk在T中开始的位置
+        else:
+            i_t = idx
+            chunk_len = BT
+            global_start = i_t * BT
+
+        # 并行步骤1~3：m_A
+        # 创建因果掩码
+        # i_t = tl.load(chunk_indices + idx * 2 + 1).to(tl.int32)
+        # o_t = i_t * BT + tl.arange(0, BT)
+        # m_t = o_t < T
+        # m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
+
+        o_t = i_t * BT + torch.arange(0, BT, dtype=torch.int32)
+        m_t = o_t < T
+        m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
+        print("==== m_A.shape = ", m_A.shape)
+        print("==== m_A ====")
+        print(m_A)
+
+        for i_b in range(B):
+        # 遍历所有batch
+            if IS_VARLEN:
+                current_global_start = global_start
+            else:
+                batch_bos = i_b * T
+                current_global_start = batch_bos + global_start
+            for i_h in range(H):
+            # 遍历所有head 
+                # 获取当前chunk的dw, k, beta, g
+                dw_chunk = dw[i_b, i_h, current_global_start : current_global_start + chunk_len, :]  # [BT, K]
+                k_chunk = k[i_b, i_h, current_global_start : current_global_start + chunk_len, : ]  # [BT, K]
+                # beta形状: [B, H, T]
+                beta_chunk = beta[i_b, i_h, current_global_start : current_global_start + chunk_len]  # [BT]
+                # g形状: [B, H, T]
+                g_chunk = g[i_b, i_h, current_global_start:current_global_start + chunk_len]  # [BT]
+
+                # 获取当前chunk的du, v
+                du_chunk = du[i_b, i_h, current_global_start : current_global_start + chunk_len, :]  # [BT, V]
+                v_chunk = v[i_b, i_h, current_global_start : current_global_start + chunk_len, :]  # [BT, V]
+
+                # 获取当前chunk的A向量
+                # A形状: [B, H, T, BT]
+                # 我们需要获取这个chunk对应的A向量
+                # 注意: A的每个位置存储的是该chunk对应的A向量
+                A_chunk = A[i_b, i_h, current_global_start : current_global_start + chunk_len, :]  # [BT, BT]
+                
+                g_exp_chunk = torch.exp(g_chunk.to(torch.float32))
+
+                # 步骤1: b_dA_1
+                # b_dA_1 = dw_chunk @ b_k_beta_g.T
+                b_k_beta_g = k_chunk.to(torch.float32) * (beta_chunk.to(torch.float32) * g_exp_chunk.to(torch.float32))[:, None]
+                if chunk_len == 1:
+                    b_dA_1 = torch.sum(dw_chunk.to(torch.float32) * b_k_beta_g.to(torch.float32)).reshape(chunk_len, chunk_len)
+                else:
+                    b_dA_1 = torch.matmul(dw_chunk.to(torch.float32), b_k_beta_g.T.to(torch.float32))
+
+                # 步骤2: b_dA_2
+                # b_dA_2 = du_chunk @ b_v_beta.T
+                b_v_beta = v_chunk.to(torch.float32) * beta_chunk.to(torch.float32)[:, None]
+                if chunk_len == 1:
+                    b_dA_2 = torch.sum(du_chunk.to(torch.float32) * b_v_beta.to(torch.float32)).reshape(chunk_len, chunk_len)
+                else:
+                    b_dA_2 = torch.matmul(du_chunk.to(torch.float32), b_v_beta.T.to(torch.float32))
+
+                # # 步骤3：b_dA_3
+                b_dA_3 = b_dA_1 + b_dA_2
+
+                # 步骤4：b_dA_4
+                # b_dA_4 = tl.where(m_A, b_dA_3, 0)
+                b_dA_4 = torch.where(m_A, b_dA_3.to(torch.float32), 0.0)
+
+                # 步骤5：b_dA_5
+                # b_dA_5 = b_dA_4 @ A_chunk.T
+                if chunk_len == 1:
+                    b_dA_5 = torch.sum(b_dA_4.to(torch.float32) * A_chunk.T.to(torch.float32)).reshape(chunk_len, chunk_len)
+                else:
+                    b_dA_5 = torch.matmul(b_dA_4.to(torch.float32), A_chunk.T.to(torch.float32))
+
+                # 步骤6：b_dA_6
+                # b_dA_6 = A_chunk.T @ b_dA_5
+                if chunk_len == 1:
+                    b_dA_6 = torch.sum(A_chunk.T.to(torch.float32) * b_dA_5.to(torch.float32)).reshape(chunk_len, chunk_len)
+                else:
+                    b_dA_6 = torch.matmul(A_chunk.T.to(torch.float32), b_dA_5.to(torch.float32))
+
+                # 并行步骤1~6：b_g_sub_exp
+                b_g_sub_exp = torch.exp(g_chunk.to(torch.float32)[:, None] - g_chunk.to(torch.float32)[None, :]) 
+                
+                # 步骤7：b_dA_7
+                b_dA_7 = -b_dA_6.to(torch.float32) * b_g_sub_exp.to(torch.float32)
+
+                # 步骤8：b_dA
+                # b_dA = tl.where(m_A, b_dA_7, 0)
+                b_dA = torch.where(m_A, b_dA_7.to(torch.float32), 0.0) # [BT, BT]
+
+                # 存储结果
+                dA[i_b, i_h, current_global_start : current_global_start + chunk_len, :] = b_dA.to(torch.float16)
 
     return dA
 
@@ -265,7 +407,7 @@ def test_variable():
 
     NT = len(chunk_indices)
     print("==== NT = ", NT)
-    dA_cpu = compute_dA_cpu(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
+    dA_cpu = compute_dA_cpu_var(A, dw, g, beta, k, v, du, chunk_indices, cu_seqlens, B, H, T, K, BT, NT)
     torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_cpu.pt")
     # torch.save(dA_cpu, "/data/yzq/ops-transformer_GDN/chunk_gated_delta_rule/prepare_wy_repr_bwd_da/test/output/dA_var_cpu_model_case.pt")
 
