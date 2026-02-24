@@ -103,23 +103,11 @@ private:
 };
 
 template <typename kType, typename betaType>
- __aicore__ inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::PrepareWyReprBwdDAVectorProcess(
+__aicore__ inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::PrepareWyReprBwdDAVectorProcess(
     GM_ADDR k_, GM_ADDR v_, GM_ADDR beta_, GM_ADDR A_, GM_ADDR dw_, GM_ADDR du_, GM_ADDR g_, GM_ADDR mask_,
     GM_ADDR cu_seqlens_, GM_ADDR chunk_indices_, GM_ADDR dA_, GM_ADDR workspace_)
- :
-    k(k_),
-    v(v_),
-    beta(beta_),
-    A(A_),
-    dw(dw_),
-    du(du_),
-    g(g_),
-    mask(mask_),
-    cu_seqlens(cu_seqlens_),
-    chunk_indices(chunk_indices_),
-    dA(dA_),
-    workspace(workspace_)
-    {};
+    : k(k_), v(v_), beta(beta_), A(A_), dw(dw_), du(du_), g(g_), mask(mask_),
+      cu_seqlens(cu_seqlens_), chunk_indices(chunk_indices_), dA(dA_), workspace(workspace_) {}
 
 template <typename kType, typename betaType>
 __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Init(
@@ -169,7 +157,6 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
     // DumpTensor(dA6Tensor, 6, 4096);
     return;
 }
-
 
 // k、beta和g 的计算
 template <typename kType, typename betaType>
@@ -265,15 +252,17 @@ __aicore__ void inline PrepareWyReprBwdDAVectorProcess<kType, betaType>::Process
 
                     Cast(tensorKfp32, tensorKIn, RoundMode::CAST_NONE, K * curRowNum);
                     PipeBarrier<PIPE_V>();
+
                     Mul(tensorBetafp32, tensorBetafp32, tensorGFp32, curRowNum);
                     PipeBarrier<PIPE_V>();
-                    //brcb
+
+                    // brcb
                     // DumpTensor(tensorBetafp32, 0,  8 * rowNum);
                     Brcb(tensorBetaBrcbfp32, tensorBetafp32, static_cast<uint8_t>(CeilDiv(curRowNum, 8)), {1, 8});
                     // DumpTensor(tensorBetaBrcbfp32, 0,  8 * rowNum);
                     PipeBarrier<PIPE_V>();
 
-                    //mul
+                    // mul
                     uint64_t perchannelResOffset = 0;
                     uint8_t repeatStride = K * sizeof(float32_t) / ONE_BLOCK_32;
                     while (perchannelResOffset < K) {
