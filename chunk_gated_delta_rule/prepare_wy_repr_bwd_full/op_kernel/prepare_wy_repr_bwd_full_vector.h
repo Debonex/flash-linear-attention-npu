@@ -913,11 +913,11 @@ __aicore__ void inline PrepareWyReprBwdFullVectorProcess<kType, betaType>::Proce
                     auto tensorOut = kBetaOutQue.AllocTensor<kType>();
                     // cast FP32
                     if constexpr (!std::is_same<betaType, float32_t>()) {
-                        Cast(tensorBetaFP32, tensorBetain, RoundMode::CAST_NONE, rowNum);
+                        Cast(tensorBetaFP32, tensorBetain, RoundMode::CAST_NONE, curRowNum);
                     } else {
                         DataCopy(tensorBetaFP32, tensorBetain, rowNum);
                     }
-                    Cast(tensorKFp32, tensorKin, RoundMode::CAST_NONE, K * rowNum);
+                    Cast(tensorKFp32, tensorKin, RoundMode::CAST_NONE, K * curRowNum);
                     PipeBarrier<PIPE_V>();
                     // brcb
                     Brcb(tensorBetaBrcbFP32, tensorBetaFP32, static_cast<uint8_t>(CeilDiv(curRowNum, 8)), {1, 8});
