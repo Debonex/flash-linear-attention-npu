@@ -30,6 +30,7 @@ at::Tensor npu_chunk_bwd_dqkwg(
     const at::Tensor &dox,
     const at::Tensor &dh,
     const at::Tensor &dv,
+    const at::Tensor &down_tri,
     const c10::optional<at::Tensor> &cu_seqlens,
     const c10::optional<at::Tensor> &chunk_indices,
     double scale, 
@@ -42,7 +43,7 @@ at::Tensor npu_chunk_bwd_dqkwg(
     const at::Tensor &cu_seqlens_ = c10::value_or_else(cu_seqlens, [] { return at::Tensor(); });
     const at::Tensor &chunk_indices_ = c10::value_or_else(chunk_indices, [] { return at::Tensor(); });
     EXEC_NPU_CMD(aclnnChunkBwdDqkwg,
-        q, k, v, g, h, dox, dh, dv, cu_seqlens_, chunk_indices_, scale, chunk_size, dq, dk, dw, dg);
+        q, k, v, g, h, dox, dh, dv, cu_seqlens_, chunk_indices_, down_tri, scale, chunk_size, dq, dk, dw, dg);
     return dq, dk, dw, dg;
 }
 
