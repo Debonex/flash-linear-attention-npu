@@ -37,10 +37,9 @@ private:
     __aicore__ inline void InitGlobalTensor(GM_ADDR q, GM_ADDR dv, GM_ADDR g, GM_ADDR cu_seqlens, 
                                             GM_ADDR dv2, GM_ADDR dh, GM_ADDR workspace);
     __aicore__ inline void CaclOffset(const uint32_t taskIdx, uint64_t& tailChunkLen); 
-    __aicore__ inline void CalcGatedQ(float& gLast, float& gLastExp); 
+    __aicore__ inline void CalcGatedQ(float& gLast, float& gLastExp, const bool isLastChunk); 
     __aicore__ inline void CalcDv2(const float gLast, uint64_t& curGmOffsetV, const bool isLastChunk); 
-    __aicore__ inline void UpdateDh(const float gLastExp, uint64_t& curGmOffsetH, 
-                                    const bool isLastChunk, const int32_t chunkIdx); 
+    __aicore__ inline void UpdateDh(const float gLastExp, uint64_t& curGmOffsetH, const bool isLastChunk); 
 
 
 protected:
@@ -57,6 +56,7 @@ protected:
     int32_t curChunkNum_ = 0;
     uint64_t dhBlockSize_ = 0;
     uint32_t cubeIdx_ = 0;
+    uint32_t chunkIdx_ = 0;
     uint64_t bos_ = 0; // begin on seqence
 }; // class GDRVec
 
@@ -84,7 +84,7 @@ __aicore__ inline void GDRVec<DT, GT>::InitUB()
     this->gExpLocal = this->vecTbuf.template GetWithOffset<float>(this->chunkSize, offset);
     offset += this->chunkSize * FLOAT_DTYPE_SIZE;
     uint32_t offsetQ = offset;
-    this->gLocal = this->vecTbuf.template GetWithOffset<DTYPE_G>(this->chunkSize, offset); // 32/64
+    this->gLocal = this->vecTbuf.template GetWithOffset<GT>(this->chunkSize, offset); // 32/64
     offset += this->chunkSize * HALF_DTYPE_SIZE;
     // this->gLastLocal = this->vecTbuf.template GetWithOffset<DTYPE_G>(this->chunkSize, offset); // bf16時，負責前半段的核要把後半段也搬進來拿last值
     // offset += this->chunkSize * HALF_DTYPE_SIZE;
@@ -174,18 +174,22 @@ __aicore__ inline void GDRVec<DT, GT>::Process( )
         this->curCalcTV = this->dvBufSize;
         this->curCalcBT = this->halfBT; 
         for (int32_t chunkIdx = loopNum; chunkIdx >= 0; chunkIdx --) {
-            isLastChunk = chunkIdx == curChunkNum_ - 1 ? true : false;
-            bos_ = chunkIdx * this->chunkSize;
+            chunkIdx_ = chunkIdx;
+            isLastChunk = chunkIdx_ == curChunkNum_ - 1 ? true : false;
+            bos_ = chunkIdx_ * this->chunkSize;
             // gatedQ = q * gExp
-            CalcGatedQ(gLast, gLastExp);
+            CalcGatedQ(gLast, gLastExp, isLastChunk);
             // 計算dv2 dv2 = bdv * exp(bg_last - bg) + dv[B,H,T,V]
             CalcDv2(gLast, curGmOffsetV, isLastChunk);
+            if (chunkIdx_ > 0) {
+                CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_DV2); // 计算完一个chunk的dv2,通知cube可以开始计算w @ dv2 
+            }
             // updated dh
-            if (chunkIdx == 0) {
+            if (chunkIdx_ == 0 && !isLastChunk) {
                 // 每個chunk更新bdh給下個chunk用，chunkIdx=0作爲最後一個chunk，所有的chunk都已經更新完了，無需更新bdh。
                 continue;
             }
-            UpdateDh(gLastExp, curGmOffsetH, isLastChunk, chunkIdx); 
+            UpdateDh(gLastExp, curGmOffsetH, isLastChunk); 
         }
     }
 }
@@ -206,16 +210,17 @@ __aicore__ inline void GDRVec<DT, GT>::TailChunkProcess(uint32_t tailChunkLen)
     }
     this->curCalcTK = this->curCalcBT * this->K;
     this->curCalcTV = this->curCalcBT * this->V;
-    int32_t chunkIdx = curChunkNum_ - 1;
-    bos_ = chunkIdx * this->chunkSize;
+    chunkIdx_ = curChunkNum_ - 1;
+    bos_ = chunkIdx_ * this->chunkSize;
     // gatedQ = q * gExp
-    CalcGatedQ(gLast, gLastExp);
+    CalcGatedQ(gLast, gLastExp, true);
     // 計算dv2 dv2 = bdv * exp(bg_last - bg) + dv[B,H,T,V]
     CalcDv2(gLast, curGmOffsetV, true);
-    // updated dh
-    if (chunkIdx != 0) {
-        UpdateDh(gLastExp, curGmOffsetH, true, chunkIdx); 
+    if (chunkIdx_ > 0) {
+        CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_DV2); // 计算完一个chunk的dv2,通知cube可以开始计算w @ dv2 
     }
+    // updated dh
+    UpdateDh(gLastExp, curGmOffsetH, true); 
 }
 
 template <typename DT, typename GT>
@@ -277,7 +282,7 @@ __aicore__ inline void GDRVec<DT, GT>::CaclOffset(const uint32_t taskIdx, uint64
 }
 
 template <typename DT, typename GT>
-__aicore__ inline void GDRVec<DT, GT>::CalcGatedQ(float& gLast, float& gLastExp) 
+__aicore__ inline void GDRVec<DT, GT>::CalcGatedQ(float& gLast, float& gLastExp, const bool isLastChunk) 
 {
     if (this->curCalcBT == 0) {
         CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_GQ);
@@ -293,6 +298,9 @@ __aicore__ inline void GDRVec<DT, GT>::CalcGatedQ(float& gLast, float& gLastExp)
         Exp(this->gExpLocal, this->gCastLocal, this->curCalcBT);
         gLast = this->gCastLocal.GetValue(this->curCalcBT - 1);
         gLastExp = this->gExpLocal.GetValue(this->curCalcBT - 1);
+    }
+    if (chunkIdx_ == 0) {
+        return; // chunkIdx==0时，不再需要更新dh，只需要拿到g和gLast用于计算dv2即可。
     }
     // COPY IN Q [B,H,T,K]
     CopyIn(this->qCastLocal, this->qLocal, this->qGm[gmOffsetK_ + bos_ * this->K], this->curCalcTK);
@@ -318,13 +326,11 @@ __aicore__ inline void GDRVec<DT, GT>::CalcDv2(const float gLast, uint64_t& curG
         CopyOut(this->vInLocal, this->dvCastLocal, this->dv2Gm[curGmOffsetV], this->curCalcTV, false);
     } else {
         CopyIn(this->dvCastLocal, this->vInLocal, this->dvGm[curGmOffsetV], this->dvBufSize);
-        // 64k
         Muls(this->gCastLocal, this->gCastLocal, static_cast<float>(-1.0), this->halfBT);
         Adds(this->gCastLocal, this->gCastLocal, gLast, this->halfBT);
         Exp(this->gCastLocal, this->gCastLocal, this->halfBT);
         uint8_t repeatTimes = Ceil(this->halfBT, FP32_PER_BLOCK); // halfBT is 32 or 64
         Brcb(this->gBrcbLocal, this->gCastLocal, repeatTimes, {1,FP32_PER_BLOCK});
-        
         // halfBT * 32
         CrossCoreWaitFlag(CROSS_CORE_C2V_BDV); // cube计算完一个chunk的bdv,vec开始计算对应的dv2
         CopyIn(this->bdvCastLocal, this->vInLocal, this->bdvGm[bdvOffset_], this->dvBufSize);
@@ -332,20 +338,21 @@ __aicore__ inline void GDRVec<DT, GT>::CalcDv2(const float gLast, uint64_t& curG
         Add(this->bdvCastLocal, this->bdvCastLocal, this->dvCastLocal, this->dvBufSize);
         CopyOut(this->vInLocal, this->bdvCastLocal, this->dv2Gm[curGmOffsetV], this->dvBufSize);
     }
-    CrossCoreSetFlag<0x2, PIPE_MTE3>(CROSS_CORE_V2C_DV2); // 计算完一个chunk的dv2,通知cube可以开始计算w @ dv2 
 }
 
 template <typename DT, typename GT>
-__aicore__ inline void GDRVec<DT, GT>::UpdateDh(const float gLastExp, uint64_t& curGmOffsetH, 
-                                            const bool isLastChunk, const int32_t chunkIdx) 
+__aicore__ inline void GDRVec<DT, GT>::UpdateDh(const float gLastExp, uint64_t& curGmOffsetH, const bool isLastChunk) 
 {
-    curGmOffsetH = gmOffsetH_ + chunkIdx * dhBlockSize_;
+    curGmOffsetH = gmOffsetH_ + chunkIdx_ * dhBlockSize_;
     if (isLastChunk) {
         // 初始化全零 dh_chunkIdx
         InitOutput<DT>(this->dhGm[curGmOffsetH], this->dhBufSize, 0); // 兩個vec核各初始化一半
     } else {
         CopyIn(this->bdhCastLocal, this->bdhLocal, this->dhGm[curGmOffsetH], this->dhBufSize);
         Muls(this->bdhCastLocal, this->bdhCastLocal, gLastExp, this->dhBufSize);
+    }
+    if (chunkIdx_ == 0) {
+        return;
     }
     // dh_updated = dh_i-1 * exp(bg_last) + term1*scale - term2
     CrossCoreWaitFlag(CROSS_CORE_C2V_TERM1); 
@@ -354,7 +361,7 @@ __aicore__ inline void GDRVec<DT, GT>::UpdateDh(const float gLastExp, uint64_t& 
         if (this->isScale) {
             Muls(this->qdoCastLocal, this->qdoCastLocal, this->scale, this->dhBufSize);
         }
-        if (chunkIdx != curChunkNum_ -1) {
+        if (!isLastChunk) {
             Add(this->qdoCastLocal, this->bdhCastLocal, this->qdoCastLocal, this->dhBufSize);
         }
     }
