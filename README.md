@@ -1,14 +1,12 @@
-# ops-transformer
+# flash-linear-attention
 
 ## 🔥Latest News
 
-- [2025/09] ops-transformer项目首次上线。
+- [2026/03] flashserve/flash-linear-attention 项目首次上线。
 
 ## 🚀概述
 
-ops-transformer是[CANN](https://hiascend.com/software/cann) （Compute Architecture for Neural Networks）算子库中提供transformer类大模型计算的进阶算子库，包括attention类、moe类等算子，算子库架构图如下：
-
-<img src="docs/zh/figures/architecture.png" alt="架构图"  width="700px" height="320px">
+flash-linear-attention算子库是华为公司与天津大学合作，对标flash-linear-attention仓库的基于昇腾架构的高性能线性注意力算子库。
 
 ## ⚡️快速入门
 
@@ -26,7 +24,7 @@ ops-transformer是[CANN](https://hiascend.com/software/cann) （Compute Architec
 - [算子调试调优](docs/zh/debug/op_debug_prof.md)：介绍常见的算子调试和调优方法，如DumpTensor、msProf等。
 - [算子基本概念](docs/zh/context/基本概念.md)：介绍算子领域相关术语和概念，如非连续Tensor、量化模式等。
 
-## 🔍目录结构
+## 🔍目录结构（TODO）
 关键目录如下，详细目录介绍参见[项目目录](./docs/zh/context/dir_structure.md)。
 ```
 ├── cmake                          # 项目工程编译目录
