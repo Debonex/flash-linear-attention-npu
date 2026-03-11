@@ -55,7 +55,7 @@ static constexpr const char *const INPUT_DW_NAME = "dw";
 static constexpr const char *const INPUT_DU_NAME = "du";
 static constexpr const char *const INPUT_G_NAME = "g";
 static constexpr const char *const INPUT_CHUNK_INDICES_NAME = "chunk_indices";
-
+static constexpr const char *const INPUT_SEQLENS_NAME = "cu_seqlens";
 static constexpr uint64_t SIZE_HALF = 2;
 static constexpr uint64_t SIZE_FP32 = 4;
 constexpr uint64_t ONE_BLOCK_32 = 32;
@@ -301,7 +301,7 @@ public:
 
             useUbSize += rowNum * chunkSize * sizeof(float);
             useUbSize += rowNum * chunkSize * sizeof(float);
-            useUbSize += chunkSize * sizeof(float);            useUbSize += rowNum * chunkSize * sizeof(float);
+            useUbSize += chunkSize * sizeof(float);
             useUbSize += chunkSize * chunkSize * sizeof(float);
             useUbSize += chunkSize * ONE_BLOCK_32;
             
@@ -403,16 +403,62 @@ public:
     ge::graphStatus VariableLenTiling()
     {
         const gert::StorageShape *chunkIndicesShape = context_->GetOptionalInputShape(INPUT_CHUNK_INDICES_IDX);
+        const gert::StorageShape *seqlensShape = context_->GetOptionalInputShape(INPUT_SEQLENS_IDX);
+        auto cuSeqlensTensor = context_->GetOptionalInputTensor(INPUT_SEQLENS_IDX);
+        auto chunkIndicesTensor = context_->GetOptionalInputTensor(INPUT_CHUNK_INDICES_IDX);
+        OP_CHECK_NULL_WITH_CONTEXT(context_, cuSeqlensTensor);
         OP_CHECK_NULL_WITH_CONTEXT(context_, chunkIndicesShape);
+        OP_CHECK_NULL_WITH_CONTEXT(context_, seqlensShape);
         OP_CHECK_IF(RequiredInputDimNumCheck(chunkIndicesShape, DIM_1, INPUT_CHUNK_INDICES_NAME) != ge::GRAPH_SUCCESS, ,
                     return ge::GRAPH_FAILED);
+        OP_CHECK_IF(RequiredInputDimNumCheck(seqlensShape, DIM_1, INPUT_SEQLENS_NAME) != ge::GRAPH_SUCCESS, ,
+                    return ge::GRAPH_FAILED);
+
+        const gert::Shape seqlensStorageShape = seqlensShape->GetStorageShape();
+        int64_t seqlensDim0 = seqlensStorageShape.GetDim(DIM_0);
+        OP_CHECK_IF(seqlensDim0 < 2,
+                    OP_LOGE(context_->GetNodeName(),
+                            "Check seqlens shape failed, the dim 0 of seqlens should be larger than 1, but get %ld.",
+                            seqlensDim0),
+                    return ge::GRAPH_FAILED);
+        const int64_t* cuSeqlens = cuSeqlensTensor->GetData<int64_t>();
+        OP_CHECK_NULL_WITH_CONTEXT(context_, cuSeqlens);
+        if(cuSeqlens[0] != 0){
+            OP_LOGE(context_->GetNodeName(),
+                                "Check seqlens data failed, the seqlens[0] should be 0, but get %ld.",
+                                cuSeqlens[0]);
+            return ge::GRAPH_FAILED;
+        }
+        std::vector<int64_t> expectChunkIndices;
+        for(int64_t i = 1; i < seqlensDim0; i++){
+            OP_CHECK_IF(cuSeqlens[i] < cuSeqlens[i - 1],
+                        OP_LOGE(context_->GetNodeName(),
+                                "Check seqlens data failed, the seqlens[%ld]:[%ld] should be larger than seqlens[%ld]:[%ld]",
+                                i, cuSeqlens[i], i - 1, cuSeqlens[i - 1]),
+                        return ge::GRAPH_FAILED);
+            for(int64_t j = 0;j < cuSeqlens[i]; j += chunkSize){
+                expectChunkIndices.push_back(i - 1);
+                expectChunkIndices.push_back(j / chunkSize);
+            }
+        }
+
+        
         const gert::Shape chunkIndicesStorageShape = chunkIndicesShape->GetStorageShape();
         int64_t chunkIndicesDim0 = chunkIndicesStorageShape.GetDim(DIM_0);
-        OP_CHECK_IF(chunkIndicesDim0 % 2 != 0,
+        OP_CHECK_IF(chunkIndicesDim0 != expectChunkIndices.size(),
                     OP_LOGE(context_->GetNodeName(),
-                            "Check chunk_indices shape failed, the dim 0 of chunk_indices should be even, but get %ld.",
-                            chunkIndicesDim0),
+                            "Check chunk_indices shape failed, the len of chunk_indices should be %ld, but get %ld.",
+                            expectChunkIndices.size(), chunkIndicesDim0),
                     return ge::GRAPH_FAILED);
+        const int64_t* chunkIndices = chunkIndicesTensor->GetData<int64_t>();
+        OP_CHECK_NULL_WITH_CONTEXT(context_, chunkIndices);
+        for(int64_t i = 0; i < expectChunkIndices.size(); i++){
+            OP_CHECK_IF(expectChunkIndices[i] != chunkIndices[i],
+                        OP_LOGE(context_->GetNodeName(),
+                                "Check chunk_indices data failed, the chunk_indices[%ld] should be %ld, but get %ld.",
+                                i, expectChunkIndices[i], chunkIndices[i]),
+                        return ge::GRAPH_FAILED);
+        }
         tiling_.set_chunkNum(chunkIndicesStorageShape.GetDim(DIM_0) / 2);
         return ge::GRAPH_SUCCESS;
     }
@@ -433,6 +479,7 @@ static void PrepareWyReprBwdFullTilingDataPrint(gert::TilingContext *context, Pr
 
 ge::graphStatus Tiling4PrepareWyReprBwdFull(gert::TilingContext *context)
 {
+    std::cout << "hello wordl\n";
     OP_LOGD(context->GetNodeName(), "Tiling4PrepareWyReprBwdFull start.");
     PrepareWyReprBwdFullTilingData tiling;
     PrepareWyReprBwdFullTilingProcessor processor(context, tiling);
@@ -445,8 +492,6 @@ ge::graphStatus Tiling4PrepareWyReprBwdFull(gert::TilingContext *context)
         OP_CHECK_IF(processor.FixLenTiling() != ge::GRAPH_SUCCESS, , return ge::GRAPH_FAILED);
         tiling.set_isVariable(0);
     } else {
-        const int64_t* cuSeqlens = cuSeqlensTensor->GetData<int64_t>();
-        // std::cuSeqlensTensor->
         OP_CHECK_IF(tiling.get_B() != VAR_LEN_B_DIM_1,
                     OP_LOGE(context->GetNodeName(),
                             "If cu_seqlens is not nullptr, the dim 0 of q needs to be 1, but now is %ld.",
