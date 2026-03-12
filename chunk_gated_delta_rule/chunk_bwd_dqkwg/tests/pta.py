@@ -444,7 +444,7 @@ if __name__ == "__main__":
         [1,8,65536,64,torch.bfloat16,torch.bfloat16,0.0625,torch.tensor([0,16,20000,65536])],
         [1,32,65536,64,torch.float16,torch.float32,0.0442,torch.tensor([0,16,20000,50000,65536])],
         [1,32,262144,64,torch.bfloat16,torch.bfloat16,0.03125,torch.tensor([0,16,20000,50000,65536,210000,262144])],
-        [1,2,128,64,torch.float16,torch.float16,0.088,[0,16,128]],  #21
+        [1,2,128,64,torch.float16,torch.float16,0.088,[0,16,128]],  #21 [0,16,128]
     ]
     
 
