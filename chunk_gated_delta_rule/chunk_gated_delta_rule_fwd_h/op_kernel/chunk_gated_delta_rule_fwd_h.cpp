@@ -41,25 +41,25 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
 
         using WType = Gemm::GemmType<half, layout::RowMajor>;
         using HType = Gemm::GemmType<half, layout::RowMajor>;
-        using Vworkype = Gemm::GemmType<half, layout::RowMajor>;
+        using VworkType = Gemm::GemmType<float, layout::RowMajor>;
         using KType = Gemm::GemmType<half, layout::ColumnMajor>;
-        using HworkType = Gemm::GemmType<half, layout::RowMajor>;
+        using HworkType = Gemm::GemmType<float, layout::RowMajor>;
         using VType = Gemm::GemmType<half, layout::RowMajor>;
         using GType = Gemm::GemmType<float, layout::RowMajor>;
         using UType = Gemm::GemmType<half, layout::RowMajor>;
         using HType = Gemm::GemmType<half, layout::RowMajor>;
 
         // cube 1
-        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, half, layout::RowMajor>;
-        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyWH>;
+        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::RowMajor, half, layout::RowMajor, float, layout::RowMajor>;
+        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, float, void, TileCopyWH>;
 
         // cube 2
-        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::ColumnMajor, half, layout::RowMajor, half, layout::RowMajor>;
-        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, half, void, TileCopyKV>;
+        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, half, layout::ColumnMajor, half, layout::RowMajor, float, layout::RowMajor>;
+        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, half, half, float, void, TileCopyKV>;
 
         // vec 1
         using DispatchPolicyGDNFwdHVnew = Epilogue::EpilogueAtlasA2GDNFwdHVnew;
-        using EpilogueGDNFwdHVnew = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHVnew, VType, GType, UType, Vworkype>;
+        using EpilogueGDNFwdHVnew = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHVnew, VType, GType, UType, VworkType>;
 
         // vec 2
         using DispatchPolicyGDNFwdHUpdate = Epilogue::EpilogueAtlasA2GDNFwdHUpdate;
@@ -83,25 +83,25 @@ extern "C" __global__ __aicore__ void chunk_gated_delta_rule_fwd_h(GM_ADDR k, GM
 
         using WType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using HType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
-        using Vworkype = Gemm::GemmType<half, layout::RowMajor>;
+        using VworkType = Gemm::GemmType<float, layout::RowMajor>;
         using KType = Gemm::GemmType<bfloat16_t, layout::ColumnMajor>;
-        using HworkType = Gemm::GemmType<half, layout::RowMajor>;
+        using HworkType = Gemm::GemmType<float, layout::RowMajor>;
         using VType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using GType = Gemm::GemmType<float, layout::RowMajor>;
         using UType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
         using HType = Gemm::GemmType<bfloat16_t, layout::RowMajor>;
 
         // cube 1
-        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
-        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyWH>;
+        using TileCopyWH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::RowMajor, bfloat16_t, layout::RowMajor, float, layout::RowMajor>;
+        using BlockMmadWH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, float, void, TileCopyWH>;
 
         // cube 2
-        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::ColumnMajor, bfloat16_t, layout::RowMajor, half, layout::RowMajor>;
-        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, half, void, TileCopyKV>;
+        using TileCopyKV = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, bfloat16_t, layout::ColumnMajor, bfloat16_t, layout::RowMajor, float, layout::RowMajor>;
+        using BlockMmadKV = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, bfloat16_t, bfloat16_t, float, void, TileCopyKV>;
 
         // vec 1
         using DispatchPolicyGDNFwdHVnew = Epilogue::EpilogueAtlasA2GDNFwdHVnew;
-        using EpilogueGDNFwdHVnew = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHVnew, VType, GType, UType, Vworkype>;
+        using EpilogueGDNFwdHVnew = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdHVnew, VType, GType, UType, VworkType>;
 
         // vec 2
         using DispatchPolicyGDNFwdHUpdate = Epilogue::EpilogueAtlasA2GDNFwdHUpdate;
