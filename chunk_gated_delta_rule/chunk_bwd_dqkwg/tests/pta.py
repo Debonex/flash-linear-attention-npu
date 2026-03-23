@@ -3,7 +3,7 @@ import torch_npu
 
 
 
-
+import os
 from ct import single
 import torch
 import torch.nn.functional as F
@@ -426,7 +426,7 @@ def chunk_bwd_dqkwg_cpu(
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     RANDOM_DATA = True
-    case_number = 21
+    case_number = 22
     if len(sys.argv) > 1:
         regen = sys.argv[1]
         if regen == "random":
@@ -459,7 +459,7 @@ if __name__ == "__main__":
         [1,8,65536,64,torch.bfloat16,torch.bfloat16,0.0625,torch.tensor([0,16,20000,65536])],
         [1,32,65536,64,torch.float16,torch.float32,0.0442,torch.tensor([0,16,20000,50000,65536])],
         [1,32,262144,64,torch.bfloat16,torch.bfloat16,0.03125,torch.tensor([0,16,20000,50000,65536,210000,262144])],
-        [2,4,512,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128] [0,16,135,512]
+        [2,4,512,128,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128] [0,16,135,512]
         [1,32,16384,64,torch.bfloat16,torch.float32,0.088,None],  #21 [0,16,128]
     ]
     device_id = 5
@@ -502,31 +502,36 @@ if __name__ == "__main__":
         num_chunks = T // chunk_size
     
     test_case_name = "test"
-    data_path = "/data/huangjunzhe/GDN/data/"
+    data_path = "/home/huangjunzhe/GDN/data/"
+    RUN_CPU = False
+    SAVE_FILES = True
+    os.makedirs(f'{data_path}/{test_case_name}/in/', exist_ok=True)
+    os.makedirs(f'{data_path}/{test_case_name}/out/', exist_ok=True)
     if RANDOM_DATA:
-        q = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
-        k = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
-        v = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 10000  # torch.randn([B, T, H, V], dtype=dtype)
+        q = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 1000 # std≈5e-6#torch.randn([B, T, H, K], dtype=dtype)
+        k = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
+        v = torch.randn(B,H,T,V, dtype=dtype, requires_grad=True) * 5e-7 * 10000  # torch.randn([B, T, H, V], dtype=dtype)
 
         # g = torch.randn(B,T,H, dtype=dtype, requires_grad=True) * 5e-2   # torch.randn([B, T, H], dtype=Gtype)
-        g = -torch.sort(torch.rand(B*T*H) * 100, descending=False)[0].reshape((B,T,H)).to(Gtype)    #G必须递减且为负数
+        g = -torch.sort(torch.rand(B*T*H) * 10, descending=False)[0].reshape((B,H,T)).to(Gtype)    #G必须递减且为负数
         # print("g",g)
-        do = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, V], dtype=dtype)
+        do = torch.randn(B,H,T,V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, V], dtype=dtype)
 
-        dv = torch.randn(B,T,H,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
-        w = torch.randn(B,T,H,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
+        dv = torch.randn(B,H,T,V, dtype=dtype, requires_grad=True) * 5e-7 * 1000000  # torch.randn([B, T, H, V], dtype=dtype)
+        w = torch.randn(B,H,T,K, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, T, H, K], dtype=dtype)
 
-        h = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
-        dh = torch.randn(B, num_chunks, H, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 1000 # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
-        torch.save(q, f"{data_path}/{test_case_name}/in/q_cpu.pt")
-        torch.save(k, f"{data_path}/{test_case_name}/in/k_cpu.pt")
-        torch.save(v, f"{data_path}/{test_case_name}/in/v_cpu.pt")
-        torch.save(g, f"{data_path}/{test_case_name}/in/g_cpu.pt")
-        torch.save(do, f"{data_path}/{test_case_name}/in/do_cpu.pt")
-        torch.save(dv, f"{data_path}/{test_case_name}/in/dv_cpu.pt")
-        torch.save(w, f"{data_path}/{test_case_name}/in/w_cpu.pt")
-        torch.save(h, f"{data_path}/{test_case_name}/in/h_cpu.pt")
-        torch.save(dh, f"{data_path}/{test_case_name}/in/dh_cpu.pt")
+        h = torch.randn(B, H, num_chunks, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 100000  # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        dh = torch.randn(B, H, num_chunks, K, V, dtype=dtype, requires_grad=True) * 5e-7 * 1000 # torch.randn([B, num_chunks, H, K, V], dtype=dtype)
+        if SAVE_FILES:
+            torch.save(q, f"{data_path}/{test_case_name}/in/q_cpu.pt")
+            torch.save(k, f"{data_path}/{test_case_name}/in/k_cpu.pt")
+            torch.save(v, f"{data_path}/{test_case_name}/in/v_cpu.pt")
+            torch.save(g, f"{data_path}/{test_case_name}/in/g_cpu.pt")
+            torch.save(do, f"{data_path}/{test_case_name}/in/do_cpu.pt")
+            torch.save(dv, f"{data_path}/{test_case_name}/in/dv_cpu.pt")
+            torch.save(w, f"{data_path}/{test_case_name}/in/w_cpu.pt")
+            torch.save(h, f"{data_path}/{test_case_name}/in/h_cpu.pt")
+            torch.save(dh, f"{data_path}/{test_case_name}/in/dh_cpu.pt")
     else:
         # q=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/q_cpu.pt", weights_only=False)
         # k=torch.load("/home/huangjunzhe/GDN/data/model/after_cpu/k_cpu.pt", weights_only=False)
@@ -576,15 +581,15 @@ if __name__ == "__main__":
 
     print("==============start NPU=============")
     torch_npu.npu.set_device(device_id)
-    q_npu = torch.transpose(q, 1, 2).to(dtype).npu()
-    k_npu = torch.transpose(k, 1, 2).to(dtype).npu()
-    v_npu = torch.transpose(v, 1, 2).to(dtype).npu()
-    w_npu = torch.transpose(w, 1, 2).to(dtype).npu()
-    g_npu = torch.transpose(g, 1, 2).to(Gtype).npu()
-    h_npu = torch.transpose(h, 1, 2).to(dtype).npu()
-    dv_npu = torch.transpose(dv, 1, 2).to(dtype).npu()
-    do_npu = torch.transpose(do, 1, 2).to(dtype).npu()
-    dh_npu = torch.transpose(dh, 1, 2).to(dtype).npu()
+    q_npu = q.to(dtype).npu()
+    k_npu = k.to(dtype).npu()
+    v_npu = v.to(dtype).npu()
+    w_npu = w.to(dtype).npu()
+    g_npu = g.to(Gtype).npu()
+    h_npu = h.to(dtype).npu()
+    dv_npu = dv.to(dtype).npu()
+    do_npu = do.to(dtype).npu()
+    dh_npu = dh.to(dtype).npu()
     # cu_seqlens_npu = cu_seqlens if cu_seqlens is not None else None
     chunk_indices_npu = chunk_indices if cu_seqlens is not None else None
     down_tri = q_npu
@@ -603,44 +608,53 @@ if __name__ == "__main__":
     print("dg_npu", dg_npu.shape, dg_npu.dtype)
 
     # print("dq_npu[0][0][-1]", dq_npu[0][0][-1])
+    if RUN_CPU:
+        print("=====start cpu=========")
+        q = torch.transpose(q, 1, 2).to(dtype)
+        k = torch.transpose(k, 1, 2).to(dtype)
+        v = torch.transpose(v, 1, 2).to(dtype)
+        w = torch.transpose(w, 1, 2).to(dtype)
+        g = torch.transpose(g, 1, 2).to(Gtype)
+        h = torch.transpose(h, 1, 2).to(dtype)
+        dv = torch.transpose(dv, 1, 2).to(dtype)
+        do = torch.transpose(do, 1, 2).to(dtype)
+        dh = torch.transpose(dh, 1, 2).to(dtype)
 
-    print("=====start cpu=========")
+        dq, dk, dw, dg = chunk_bwd_dqkwg_cpu(
+            q, k, v, do, h, dh, w, g, dv, scale, cu_seqlens_torch, chunk_size
+        )
+        # dq = dq.to(dtype)
+        # dk = dk.to(dtype)
+        # dw = dw.to(dtype)
+        # dg = dg.to(Gtype)
+        dq = torch.transpose(dq, 1, 2).cpu()
+        dk = torch.transpose(dk, 1, 2).cpu()
+        dw = torch.transpose(dw, 1, 2).cpu()
+        dg = torch.transpose(dg, 1, 2).cpu()
+        # print("dq[0][0][-1]", dq[0][0][-1])
+        # print("dk", dk)
+        # print("dw", dw)
+        # print("dg", dg)
 
+        print("dq", dq.cpu().shape, dq.cpu().dtype)
+        print("dk", dk.cpu().shape, dk.cpu().dtype)
+        print("dw", dw.cpu().shape, dw.cpu().dtype)
+        print("dg", dg.cpu().shape, dg.cpu().dtype)
 
-    dq, dk, dw, dg = chunk_bwd_dqkwg_cpu(
-        q, k, v, do, h, dh, w, g, dv, scale, cu_seqlens_torch, chunk_size
-    )
-    # dq = dq.to(dtype)
-    # dk = dk.to(dtype)
-    # dw = dw.to(dtype)
-    # dg = dg.to(Gtype)
-    dq = torch.transpose(dq, 1, 2).cpu()
-    dk = torch.transpose(dk, 1, 2).cpu()
-    dw = torch.transpose(dw, 1, 2).cpu()
-    dg = torch.transpose(dg, 1, 2).cpu()
-    # print("dq[0][0][-1]", dq[0][0][-1])
-    # print("dk", dk)
-    # print("dw", dw)
-    # print("dg", dg)
+        type_dict = {torch.float16:"float16", torch.float32:"float32",torch.bfloat16:"bf16"}
+        single(dq_npu,dq,calc_count=100000,dtype=type_dict[dtype])
+        single(dk_npu,dk,calc_count=100000,dtype=type_dict[dtype])
+        single(dw_npu,dw,calc_count=100000,dtype=type_dict[dtype])
+        single(dg_npu,dg,calc_count=100000,dtype=type_dict[Gtype])
+        if SAVE_FILES:
+            if RANDOM_DATA:
+                torch.save(dq,f"{data_path}/{test_case_name}/out/dq_cpu.pt")
+                torch.save(dk,f"{data_path}/{test_case_name}/out/dk_cpu.pt")
+                torch.save(dw,f"{data_path}/{test_case_name}/out/dw_cpu.pt")
+                torch.save(dg,f"{data_path}/{test_case_name}/out/dg_cpu.pt")
 
-    print("dq", dq.cpu().shape, dq.cpu().dtype)
-    print("dk", dk.cpu().shape, dk.cpu().dtype)
-    print("dw", dw.cpu().shape, dw.cpu().dtype)
-    print("dg", dg.cpu().shape, dg.cpu().dtype)
-
-    type_dict = {torch.float16:"float16", torch.float32:"float32",torch.bfloat16:"bf16"}
-    single(dq_npu,dq,calc_count=100000,dtype=type_dict[dtype])
-    single(dk_npu,dk,calc_count=100000,dtype=type_dict[dtype])
-    single(dw_npu,dw,calc_count=100000,dtype=type_dict[dtype])
-    single(dg_npu,dg,calc_count=100000,dtype=type_dict[Gtype])
-
-    if RANDOM_DATA:
-        torch.save(dq,f"{data_path}/{test_case_name}/out/dq_cpu.pt")
-        torch.save(dk,f"{data_path}/{test_case_name}/out/dk_cpu.pt")
-        torch.save(dw,f"{data_path}/{test_case_name}/out/dw_cpu.pt")
-        torch.save(dg,f"{data_path}/{test_case_name}/out/dg_cpu.pt")
-
-    torch.save(dq_npu,f"{data_path}/{test_case_name}/out/dq_npu.pt")
-    torch.save(dk_npu,f"{data_path}/{test_case_name}/out/dk_npu.pt")
-    torch.save(dw_npu,f"{data_path}/{test_case_name}/out/dw_npu.pt")
-    torch.save(dg_npu,f"{data_path}/{test_case_name}/out/dg_npu.pt")
+            torch.save(dq_npu,f"{data_path}/{test_case_name}/out/dq_npu.pt")
+            torch.save(dk_npu,f"{data_path}/{test_case_name}/out/dk_npu.pt")
+            torch.save(dw_npu,f"{data_path}/{test_case_name}/out/dw_npu.pt")
+            torch.save(dg_npu,f"{data_path}/{test_case_name}/out/dg_npu.pt")
+            print(f"files saved to {data_path}/{test_case_name}/out/ .")
