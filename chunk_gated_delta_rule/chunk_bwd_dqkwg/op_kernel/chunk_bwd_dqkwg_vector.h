@@ -87,6 +87,7 @@ private:
     uint64_t wsMm6Offset;
     uint64_t wsMm7Offset;
     uint64_t wsMul1Offset;
+    int BUFFER_NUM = 1;
     
     // Pipeline
     TPipe *pipe = nullptr;
@@ -155,6 +156,12 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::Init(const C
     wsMul1Offset = tiling.wsMul1Offset;
     uint64_t dgLastSize = tiling.dgLastSize;
     isVarLen = tiling.isVarLen;
+
+    if (BT == 64) {
+        BUFFER_NUM = 2;
+    } else {
+        BUFFER_NUM = 1;
+    }
 
     gmQ.SetGlobalBuffer((__gm__ DataType *)ptrQ);
     gmK.SetGlobalBuffer((__gm__ DataType *)ptrK);
@@ -232,14 +239,17 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
     uint32_t BT_sub_offset = 0;
 
     uint32_t dwSize_sub = BT_sub * K;
+    uint32_t vecTaskIdx = 0;
 
     // 初始化 buffers
     pipe->InitBuffer(inQue1, 1, hDhSize_sub * sizeof(float));
     pipe->InitBuffer(inQue2, 1, hDhSize_sub * sizeof(float));   // hDhSize >= dwSize
-    pipe->InitBuffer(outQue1, 1, sizeof(float) * 8);  // dg_last (对齐到 32 字节)
-    pipe->InitBuffer(outQue2, 1, dwSize * sizeof(DataType));
+    pipe->InitBuffer(outQue1, BUFFER_NUM, sizeof(float) * 8);  // dg_last (对齐到 32 字节)
+    pipe->InitBuffer(outQue2, BUFFER_NUM, dwSize * sizeof(DataType));
 
     // 发送同步信号给 Cube
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     uint32_t bos = 0;
@@ -252,7 +262,8 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
         dwSize_sub = BT_sub * K;
         
         for (uint32_t h = 0; h < H; h++) {
-            if (GetSubBlockIdx() == 1) {
+            ++vecTaskIdx;
+            if (vecTaskIdx % GetSubBlockNum() != GetSubBlockIdx()) {
                 CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
                 CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
                 continue;
@@ -268,8 +279,8 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
             // ========== 计算 dg_last = sum(h * dh) ==========
             float dg_last_sum = 0.0f;
             // 等待 Cube 信号 (dw Cube 计算)
-            CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
 
+            
             // CopyIn: h 和 dh
             {
                 auto tensorHIn = inQue1.AllocTensor<DataType>();
@@ -338,7 +349,7 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
             // ========== 处理 dw: 取负号 ==========
             // Cube 计算的是 dv @ h^T, 需要乘以 -1
             // 从 workspace 读取 dw, 乘以 -1, 写回最终输出
-
+            CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
             // CopyIn: dw from workspace
             {
                 auto tensorDwIn = inQue2.AllocTensor<DataType>();
@@ -350,16 +361,14 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart1
             {
                 auto tensorDwIn = inQue2.DeQue<DataType>();
                 auto tensorCalcDw = tensorDwIn.template ReinterpretCast<float>();
-                // DumpTensor(tensorDwIn,__LINE__,32);
                 auto tensorDwOut = outQue2.AllocTensor<DataType>();
-                
+
                 // Cast to fp32, 乘以 -1, cast back
                 Cast(tensorCalcDw, tensorDwIn[dwSize_sub], RoundMode::CAST_NONE, dwSize_sub);
                 PipeBarrier<PIPE_V>();
                 Muls(tensorCalcDw, tensorCalcDw, -1.0f, dwSize_sub);
                 PipeBarrier<PIPE_V>();
                 Cast(tensorDwOut, tensorCalcDw, RoundMode::CAST_RINT, dwSize_sub);
-                // DumpTensor(tensorCalcDw,__LINE__,32);
                 inQue2.FreeTensor(tensorDwIn);
                 outQue2.EnQue(tensorDwOut);
             }
@@ -400,8 +409,8 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart2
     
     // 初始化 buffers
     
-    pipe->InitBuffer(inQue3, 1, gSize * sizeof(float));        // g values
-    pipe->InitBuffer(outQue1, 1, dsSize_sub * sizeof(float));   // ds_temp output   32K/8K
+    pipe->InitBuffer(inQue3, BUFFER_NUM, gSize * sizeof(float));        // g values
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dsSize_sub * sizeof(float));   // ds_temp output   32K/8K
 
     pipe->InitBuffer(calcBuf1, BT * 8 * sizeof(float));             // g in fp32
     pipe->InitBuffer(calcBuf2, BT * sizeof(float));            // g temp [BT,1]
@@ -571,10 +580,10 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart3
     const uint32_t gSize = BT;
 
     // 初始化 buffers
-    pipe->InitBuffer(inQue1, 1, dsSize_sub * sizeof(float));    // ds from Cube
-    pipe->InitBuffer(inQue2, 1, dsSize_sub * sizeof(float));    // mm5/mul1 from workspace
-    pipe->InitBuffer(outQue1, 1, dsSize_sub * sizeof(DataType));   // ds_temp output   32K/8K
-    pipe->InitBuffer(outQue2, 1, gSize * sizeof(float));       // dg output
+    pipe->InitBuffer(inQue1, BUFFER_NUM, dsSize_sub * sizeof(float));    // ds from Cube
+    pipe->InitBuffer(inQue2, BUFFER_NUM, dsSize_sub * sizeof(float));    // mm5/mul1 from workspace
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dsSize_sub * sizeof(DataType));   // ds_temp output   32K/8K
+    pipe->InitBuffer(outQue2, BUFFER_NUM, gSize * sizeof(float));       // dg output
 
 
     pipe->InitBuffer(calcBuf4, gSize * sizeof(float));        // m_A
@@ -587,7 +596,10 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart3
 
     uint32_t bos = 0;
     uint32_t eos = 0;
+    uint32_t vecTaskIdx = 0;
     // 发送同步信号
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
 
@@ -600,8 +612,13 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart3
         uint32_t chunkIdx = loopIdx % numChunks;
 
         for (uint32_t h = 0; h < H; h++) {
-            if (GetSubBlockIdx() == 1) {
-
+            // if (GetSubBlockIdx() == 1) {
+            //     CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
+            //     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
+            //     continue;
+            // }
+            ++vecTaskIdx;
+            if (vecTaskIdx % GetSubBlockNum() != GetSubBlockIdx()) {
                 CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
                 CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
                 continue;
@@ -770,12 +787,12 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart4
     uint32_t dqSize_sub_offset = BT_sub_start * K;
     const uint32_t gSize = BT;
     // 初始化 buffers
-    pipe->InitBuffer(inQue1, 1, dqSize_sub * sizeof(float));    // dq from Cube   //64K
-    pipe->InitBuffer(inQue2, 1, dqSize_sub * sizeof(float));    // q
-    pipe->InitBuffer(inQue3, 1, gSize * sizeof(GType));        // g
-    pipe->InitBuffer(inQue4, 1, gSize * sizeof(GType));        // g             
-    pipe->InitBuffer(outQue1, 1, dqSize_sub * sizeof(DataType));   // dq output
-    pipe->InitBuffer(outQue2, 1, gSize * sizeof(float));       // dg partial
+    pipe->InitBuffer(inQue1, BUFFER_NUM, dqSize_sub * sizeof(float));    // dq from Cube   //64K
+    pipe->InitBuffer(inQue2, BUFFER_NUM, dqSize_sub * sizeof(float));    // q
+    pipe->InitBuffer(inQue3, BUFFER_NUM, gSize * sizeof(GType));        // g
+    pipe->InitBuffer(inQue4, BUFFER_NUM, gSize * sizeof(GType));        // g             
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dqSize_sub * sizeof(DataType));   // dq output
+    pipe->InitBuffer(outQue2, BUFFER_NUM, gSize * sizeof(float));       // dg partial
 
     pipe->InitBuffer(calcBuf3, gSize * (8) * sizeof(float));        //第一次reducesum结果：[BT, 8]
     pipe->InitBuffer(gBuf, gSize * sizeof(float));
@@ -953,12 +970,12 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart5
     uint32_t real_BT = BT;
     
     // 初始化 buffers
-    pipe->InitBuffer(inQue1, 1, dkSize * sizeof(float));
-    pipe->InitBuffer(inQue2, 1, dkSize * sizeof(float));
-    pipe->InitBuffer(inQue3, 1, gSize * sizeof(GType));
-    pipe->InitBuffer(inQue4, 1, gSize * sizeof(GType));
-    pipe->InitBuffer(outQue1, 1, dkSize * sizeof(DataType));
-    pipe->InitBuffer(outQue2, 1, gSize * sizeof(GType));
+    pipe->InitBuffer(inQue1, BUFFER_NUM, dkSize * sizeof(float));
+    pipe->InitBuffer(inQue2, BUFFER_NUM, dkSize * sizeof(float));
+    pipe->InitBuffer(inQue3, BUFFER_NUM, gSize * sizeof(GType));
+    pipe->InitBuffer(inQue4, BUFFER_NUM, gSize * sizeof(GType));
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dkSize * sizeof(DataType));
+    pipe->InitBuffer(outQue2, BUFFER_NUM, gSize * sizeof(GType));
 
     pipe->InitBuffer(calcBuf4, gSize * sizeof(float));
     pipe->InitBuffer(gBuf, gSize * sizeof(float));
@@ -969,9 +986,11 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart5
     auto tensorDgTmp = calcBuf4.Get<float>();
     uint32_t bos = 0;
     uint32_t eos = 0;
+    uint32_t vecTaskIdx = 0;
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
-    
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
+    CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
     for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += coreNum) {
         GetChunkOffset(ptrCuSeqLen, ptrChunkIndices, B, H, T, BT, loopIdx, bos, eos);
         uint32_t actual_chunk_len = eos - bos;
@@ -982,7 +1001,13 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart5
         uint32_t chunkIdx = loopIdx % numChunks;
         
         for (uint32_t h = 0; h < H; h++) {
-            if (GetSubBlockIdx() == 1) {
+            // if (GetSubBlockIdx() == 1) {
+            //     CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
+            //     CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
+            //     continue;
+            // }
+            ++vecTaskIdx;
+            if (vecTaskIdx % GetSubBlockNum() != GetSubBlockIdx()) {
                 CrossCoreWaitFlag(SYNC_AIC_AIV_FLAG_0);
                 CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNC_AIV_AIC_FLAG_0);
                 continue;
@@ -1200,9 +1225,9 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart6
     uint32_t dqSize = BT * K;
     
     // 初始化 buffers
-    pipe->InitBuffer(inQue1, 1, dqSize * sizeof(float));    // dq current
-    pipe->InitBuffer(inQue2, 1, dqSize * sizeof(float));    // mm6 from Cube
-    pipe->InitBuffer(outQue1, 1, dqSize * sizeof(DataType));
+    pipe->InitBuffer(inQue1, BUFFER_NUM, dqSize * sizeof(float));    // dq current
+    pipe->InitBuffer(inQue2, BUFFER_NUM, dqSize * sizeof(float));    // mm6 from Cube
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dqSize * sizeof(DataType));
 
     uint32_t bos = 0;
     uint32_t eos = 0;
@@ -1288,9 +1313,9 @@ __aicore__ inline void ChunkBwdDqkwgVectorProcess<DataType, GType>::ProcessPart7
     uint32_t dkSize = BT * K;
     
     // 初始化 buffers
-    pipe->InitBuffer(inQue1, 1, dkSize * sizeof(float));    // dk current
-    pipe->InitBuffer(inQue2, 1, dkSize * sizeof(float));    // mm6 from Cube
-    pipe->InitBuffer(outQue1, 1, dkSize * sizeof(DataType));
+    pipe->InitBuffer(inQue1, BUFFER_NUM, dkSize * sizeof(float));    // dk current
+    pipe->InitBuffer(inQue2, BUFFER_NUM, dkSize * sizeof(float));    // mm6 from Cube
+    pipe->InitBuffer(outQue1, BUFFER_NUM, dkSize * sizeof(DataType));
 
     uint32_t bos = 0;
     uint32_t eos = 0;

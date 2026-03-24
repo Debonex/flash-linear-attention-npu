@@ -163,19 +163,14 @@ public:
         
         // Layout 创建
         auto layoutBTxK = LayoutRowMajor::MakeLayout<ElementA>(params.BT, params.K);
-        // auto layoutKxBT = LayoutColMajor::MakeLayout<ElementA>(params.BT, params.K);
         auto layoutKxBT = LayoutColMajor::MakeLayout<ElementA>(params.K, params.BT);
         auto layoutBTxV = LayoutRowMajor::MakeLayout<ElementA>(params.BT, params.V);
-        // auto layoutVxBT = LayoutColMajor::MakeLayout<ElementA>(params.BT, params.V);
         auto layoutVxBT = LayoutColMajor::MakeLayout<ElementA>(params.V, params.BT);
         auto layoutBTxBT = LayoutRowMajor::MakeLayout<ElementA>(params.BT, params.BT);
         auto layoutBTxBT_T = LayoutColMajor::MakeLayout<ElementA>(params.BT, params.BT);
         auto layoutKxV = LayoutRowMajor::MakeLayout<ElementA>(params.K, params.V);
-        // auto layoutVxK = LayoutColMajor::MakeLayout<ElementA>(params.K, params.V);
         auto layoutVxK = LayoutColMajor::MakeLayout<ElementA>(params.V, params.K);
-                // AscendC::printf("params.ptrDv %d %d\n",params.ptrDv,params.ptrDv);
-                // AscendC::printf("params.ptrH %d %d\n",params.ptrH,params.ptrH);
-                // AscendC::printf("params.+++ptrDw %d %d\n",params.ptrDw,params.ptrDw);
+
         uint32_t bos = 0;
         uint32_t eos = 0;
 
@@ -185,14 +180,9 @@ public:
             auto layoutH = LayoutColMajor::MakeLayout<ElementA>(params.K, params.V);
             // printf("[cube]coreLoops %d, H %d\n",coreLoops,params.H);
             for (uint32_t loopIdx = coreIdx; loopIdx < coreLoops; loopIdx += coreNum) {
-            // for (uint32_t loopIdx = coreIdx; loopIdx < 1; loopIdx += coreNum) {
-                // if (params.isVarLen == 1) {
-                    GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
-                                    params.BT, loopIdx, bos, eos);
-                // }
-
+                GetChunkOffset(params.ptrCuSeqLens, params.ptrChunkIndices, params.B, params.H, params.T,
+                                params.BT, loopIdx, bos, eos);
                 uint32_t actual_chunk_len = eos-bos;
-                // AscendC::printf("[cube] loopIdx %d, params.B %d * params.numChunks %d, bos %d, eos %d, actual_chunk_len %d\n",loopIdx,params.B,params.numChunks, bos, eos, actual_chunk_len);
                 uint32_t bIdx = loopIdx / params.numChunks;
                 uint32_t chunkIdx = loopIdx % params.numChunks;
 
@@ -201,23 +191,21 @@ public:
                     static_cast<uint32_t>(params.K),
                     static_cast<uint32_t>(params.V)
                 };
-                // AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIV_AIC_FLAG_0);
+
                 for (uint32_t h = 0; h < params.H; h++) {
-// for (uint32_t h = 0; h < 1; h++) {
+
                     // 设置 GM 地址
                     // dv: [B, H, T, V] -> offset = ((b * H + h) * T + chunk * BT) * V
                     // uint64_t dvOffset = ((bIdx * params.H + h) * params.T + bos) * params.V;
                     uint64_t dvOffset = (h * params.T + bos) * params.V;
-// dvOffset = 0;
+
                     // h: [B, H, num_chunks, K, V] -> offset = ((b * numChunks + chunk) * H + h) * K * V
                     uint64_t hOffset = ((bIdx * params.H + h) * params.numChunks + chunkIdx) * params.K * params.V;
-// hOffset = 0;
+
                     // dw output (workspace): [B, H, T, K]
                     // uint64_t dwOffset = ((bIdx * params.H + h) * params.T + bos) * params.K;
                     uint64_t dwOffset = (h * params.T + bos) * params.K;
-// dwOffset = 0;
-// printf("bIdx %d, chunkIdx %d, h %d, uint64_t dvOffset %d = ((bIdx %d * params.H %d + h %d) * params.T %d + bos %d) * params.V %d;\n",bIdx, chunkIdx, h,((bIdx * params.H + h) * params.T + bos) * params.V,bIdx ,params.H ,h, params.T , bos, params.V);
-// printf("bIdx %d, chunkIdx %d, h %d, uint64_t dwOffset %d = ((bIdx %d * params.H %d + h %d) * params.T %d + bos %d) * params.K %d\n",bIdx, chunkIdx, h,((bIdx * params.H + h) * params.T + bos) * params.K,bIdx,params.H, h, params.T, bos,params.K);
+
                     GlobalTensor<ElementA> gmDv;
                     gmDv.SetGlobalBuffer((__gm__ ElementA *)params.ptrDv + dvOffset);
                     // gmDv.SetGlobalBuffer((__gm__ ElementA *)params.ptrDv);
@@ -249,6 +237,8 @@ public:
                 }
             }
             // 最终同步(后移)
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
         }
@@ -357,6 +347,8 @@ public:
             }
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
         }
         AscendC::SyncAll<false>();
 
@@ -412,12 +404,6 @@ public:
                     blockMmadPart4(tensorBlockDo, tensorBlockH, tensorBlockDq, actualBlockShape);
 
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);
-// printf("[cube] loopIdx %d,h %d,DoOffset %d hOffset %d dqOffset %d actual_chunk_len %d\n",loopIdx,h,doOffset, hOffset, dqOffset, actual_chunk_len);
-// if (loopIdx == 0 &&  h == 2) {
-//     DumpTensor(gmDo,__LINE__,3*128);
-//     DumpTensor(gmH,__LINE__,128*128);
-//     DumpTensor(gmDq,__LINE__,3*128);
-// }
                 }
             }
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
@@ -474,15 +460,12 @@ public:
                                                   tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
                     
                     blockMmadPart5(tensorBlockV, tensorBlockDh, tensorBlockDk, actualBlockShape);
-// if(true){
-//     printf("[cube] loopIdx %d h %d dkOffset %d\n",loopIdx,h,dkOffset);
-//     // DumpTensor(gmV,__LINE__,64);
-//     // DumpTensor(gmDh,__LINE__,64);
-//     DumpTensor(gmDk,__LINE__,64);
-// }
+
                     AscendC::CrossCoreSetFlag<0x2, PIPE_FIX>(SYNC_AIC_AIV_FLAG_0);
                 }
             }
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
+            AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
             AscendC::CrossCoreWaitFlag(SYNC_AIV_AIC_FLAG_0);
         }
