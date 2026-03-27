@@ -25,7 +25,7 @@ constexpr uint64_t CONST_K = 128;
 constexpr uint64_t CONST_V = 128;
 constexpr uint64_t CONST_BT = 64;
 constexpr uint64_t CONST_NUM_CHUNKS = 44;//CONST_T / CONST_BT;  // 32
-
+constexpr int32_t CAL_NUM_FLOAT = 64; // API一次能处理256B，能计算64个float元素
 // Part 1: dw 和 dg_last 计算 (C-V 融合)
 constexpr uint64_t SYNC_PART1_AIC_AIV = 10;  // AIC -> AIV
 constexpr uint64_t SYNC_PART1_AIV_AIC = 11;  // AIV -> AIC
@@ -95,13 +95,11 @@ __aicore__ void inline GetChunkOffset(GM_ADDR cu_seqlens, GM_ADDR chunk_indices,
         bos += (bIdx * H * T);
         eos += (bIdx * H * T);
     } else {
-        // AscendC::printf("222\n");
         AscendC::GlobalTensor<uint64_t> cuSeqlensTensor;
         AscendC::GlobalTensor<uint64_t> chunkIndicesTensor;
         cuSeqlensTensor.SetGlobalBuffer((__gm__ uint64_t *)cu_seqlens);
         chunkIndicesTensor.SetGlobalBuffer((__gm__ uint64_t *)chunk_indices);
-// DumpTensor(cuSeqlensTensor,__LINE__,64);
-// DumpTensor(chunkIndicesTensor,__LINE__,64);
+
         uint32_t seqIdx = chunkIndicesTensor.GetValue(2 * loopIdx);
         uint32_t chunkIdx = chunkIndicesTensor.GetValue(2 * loopIdx + 1);
         uint32_t curSeqBegin = cuSeqlensTensor.GetValue(seqIdx);
