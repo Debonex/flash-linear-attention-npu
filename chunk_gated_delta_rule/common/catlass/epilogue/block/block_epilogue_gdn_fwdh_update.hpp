@@ -65,7 +65,7 @@ public:
     void operator()(
         AscendC::GlobalTensor<HElementOutput> hOutput,
         AscendC::GlobalTensor<FinalStateElement> finalState,
-        AscendC::GlobalTensor<float> gInput,
+        AscendC::GlobalTensor<GElementInput> gInput,
         AscendC::GlobalTensor<HElementInput> hInput,
         AscendC::GlobalTensor<float> hUpdateInput,
         uint32_t chunkSize,
@@ -88,7 +88,7 @@ public:
         AscendC::ResetMask();
 
         AscendC::GlobalTensor<HElementOutput> hOutputThisSubBlock = hOutput[offsetH];
-        AscendC::GlobalTensor<float> gInputThisSubBlock = gInput;
+        AscendC::GlobalTensor<GElementInput> gInputThisSubBlock = gInput;
         AscendC::GlobalTensor<HElementInput> hInputThisSubBlock = hInput[offsetH];
         AscendC::GlobalTensor<float> hUpdateInputThisSubBlock = hUpdateInput[offsetH];
         AscendC::GlobalTensor<FinalStateElement> finalStateThisSubBlock = finalState[offsetH];
@@ -101,7 +101,17 @@ public:
         AscendC::Cast(calcUbTensor, hUbTensor, AscendC::RoundMode::CAST_NONE, mActualThisSubBlock * nActual);
         AscendC::PipeBarrier<PIPE_V>();
         
-        glastUbTensor.SetValue(0, gInputThisSubBlock.GetValue(chunkSize-1));
+        GElementInput gLastVal = gInputThisSubBlock.GetValue(chunkSize-1);
+        float gLastFloat = 0.0f;
+        if constexpr(std::is_same<GElementInput, float>::value) {
+            gLastFloat = gLastVal;
+        } else if constexpr(std::is_same<GElementInput, half>::value) {
+            gLastFloat = (float)gLastVal;
+        } else if constexpr(std::is_same<GElementInput, bfloat16_t>::value) {
+            gLastFloat = AscendC::ToFloat(gLastVal);
+        }
+        glastUbTensor.SetValue(0, gLastFloat);
+
         AscendC::SetFlag<AscendC::HardEvent::S_V>(EVENT_ID0);
         AscendC::WaitFlag<AscendC::HardEvent::S_V>(EVENT_ID0);
         AscendC::Exp(glastUbTensor, glastUbTensor, 1);

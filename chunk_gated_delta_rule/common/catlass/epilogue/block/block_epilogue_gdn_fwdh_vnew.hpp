@@ -47,7 +47,9 @@ public:
         constexpr uint32_t PONG_G_BUF_OFFSET = 161 * 1024;
         constexpr uint32_t PING_G_SUB_BUF_OFFSET = 162 * 1024;
         constexpr uint32_t PONG_G_SUB_BUF_OFFSET = 163 * 1024;
-        constexpr uint32_t SHARE_BUF_OFFSET = 164 * 1024;
+        constexpr uint32_t PING_G_INPUT_BUF_OFFSET = 164 * 1024;
+        constexpr uint32_t PONG_G_INPUT_BUF_OFFSET = 165 * 1024;
+        constexpr uint32_t SHARE_BUF_OFFSET = 166 * 1024;
 
         calcUbTensor = resource.ubBuf.template GetBufferByByte<float>(CALC_BUF_OFFSET);
 
@@ -56,6 +58,7 @@ public:
         wsUbTensor_ping = resource.ubBuf.template GetBufferByByte<float>(PING_BUF_1_OFFSET);
         gUbTensor_ping = resource.ubBuf.template GetBufferByByte<float>(PING_G_BUF_OFFSET);
         gLastUbTensor_ping = resource.ubBuf.template GetBufferByByte<float>(PING_G_SUB_BUF_OFFSET);
+        gInputUbTensor_ping = resource.ubBuf.template GetBufferByByte<GElementInput>(PING_G_INPUT_BUF_OFFSET);
         vNewOutputUbTensor_ping = resource.ubBuf.template GetBufferByByte<VElementOutput>(PING_BUF_1_OFFSET);
         vNewDecayUbTensor_ping = resource.ubBuf.template GetBufferByByte<VElementOutput>(PING_BUF_0_OFFSET);
 
@@ -64,6 +67,7 @@ public:
         wsUbTensor_pong = resource.ubBuf.template GetBufferByByte<float>(PONG_BUF_1_OFFSET);
         gUbTensor_pong = resource.ubBuf.template GetBufferByByte<float>(PONG_G_BUF_OFFSET);
         gLastUbTensor_pong = resource.ubBuf.template GetBufferByByte<float>(PONG_G_SUB_BUF_OFFSET);
+        gInputUbTensor_pong = resource.ubBuf.template GetBufferByByte<GElementInput>(PONG_G_INPUT_BUF_OFFSET);
         vNewOutputUbTensor_pong = resource.ubBuf.template GetBufferByByte<VElementOutput>(PONG_BUF_1_OFFSET);
         vNewDecayUbTensor_pong = resource.ubBuf.template GetBufferByByte<VElementOutput>(PONG_BUF_0_OFFSET);
 
@@ -78,7 +82,7 @@ public:
     void operator()(
         AscendC::GlobalTensor<VElementOutput> vnewOutput,
         AscendC::GlobalTensor<VElementOutput> vnewdecayOutput,
-        AscendC::GlobalTensor<float> gInput,
+        AscendC::GlobalTensor<GElementInput> gInput,
         AscendC::GlobalTensor<UElementInput> uInput,
         AscendC::GlobalTensor<float> wsInput,
         uint32_t chunkSize,
@@ -128,7 +132,7 @@ public:
 
         AscendC::GlobalTensor<VElementOutput> vnewOutputThisSubBlock = vnewOutput[offsetK];
         AscendC::GlobalTensor<VElementOutput> vnewdecayOutputThisSubBlock = vnewdecayOutput[offsetK];
-        AscendC::GlobalTensor<float> gInputThisSubBlock = gInput;
+        AscendC::GlobalTensor<GElementInput> gInputThisSubBlock = gInput;
         AscendC::GlobalTensor<UElementInput> uInputThisSubBlock = uInput[offsetK];
         AscendC::GlobalTensor<float> wsInputThisSubBlock = wsInput[offsetK];
 
@@ -138,19 +142,28 @@ public:
         AscendC::LocalTensor<float> wsUbTensor = isFirst ? wsUbTensor_ping : wsUbTensor_pong;
         AscendC::LocalTensor<float> gUbTensor = isFirst ? gUbTensor_ping : gUbTensor_pong;
         AscendC::LocalTensor<float> gLastUbTensor = isFirst ? gLastUbTensor_ping : gLastUbTensor_pong;
+        AscendC::LocalTensor<GElementInput> gInputUbTensor = isFirst ? gInputUbTensor_ping : gInputUbTensor_pong;
         AscendC::LocalTensor<VElementOutput> vNewOutputUbTensor = isFirst ? vNewOutputUbTensor_ping : vNewOutputUbTensor_pong;
         AscendC::LocalTensor<VElementOutput> vNewDecayUbTensor = isFirst ? vNewDecayUbTensor_ping : vNewDecayUbTensor_pong;
-
-        AscendC::DataCopyParams gUbParams{1, (uint16_t)(mActual * sizeof(float)), 0, 0};
-        AscendC::DataCopyPadParams gUbPadParams{false, 0, 0, 0};
 
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag);
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID2 + pingpongFlag);
 
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID2 + pingpongFlag);
-        AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gUbParams, gUbPadParams);
+        if constexpr(std::is_same<GElementInput, float>::value) {
+            AscendC::DataCopyParams gUbParams{1, (uint16_t)(mActual * sizeof(float)), 0, 0};
+            AscendC::DataCopyPadParams gUbPadParams{false, 0, 0, 0};
+            AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gUbParams, gUbPadParams);
+        } else {
+            AscendC::DataCopyParams gUbParams{1, (uint16_t)(mActual * sizeof(half)), 0, 0};
+            AscendC::DataCopyPadParams gUbPadParams{false, 0, 0, 0};
+            AscendC::DataCopyPad(gInputUbTensor, gInputThisSubBlock, gUbParams, gUbPadParams);
+        }
         AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2 + pingpongFlag);
+        if constexpr(!std::is_same<GElementInput, float>::value) {
+            AscendC::Cast(gUbTensor, gInputUbTensor, AscendC::RoundMode::CAST_NONE, mActual);
+        }
 
         AscendC::SetFlag<AscendC::HardEvent::V_S>(EVENT_ID2 + pingpongFlag);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(EVENT_ID2 + pingpongFlag);
@@ -221,6 +234,7 @@ private:
     AscendC::LocalTensor<float> wsUbTensor_ping;
     AscendC::LocalTensor<float> gUbTensor_ping;
     AscendC::LocalTensor<float> gLastUbTensor_ping;
+    AscendC::LocalTensor<GElementInput> gInputUbTensor_ping;
     AscendC::LocalTensor<VElementOutput> vNewOutputUbTensor_ping;
     AscendC::LocalTensor<VElementOutput> vNewDecayUbTensor_ping;
 
@@ -229,6 +243,7 @@ private:
     AscendC::LocalTensor<float> wsUbTensor_pong;
     AscendC::LocalTensor<float> gUbTensor_pong;
     AscendC::LocalTensor<float> gLastUbTensor_pong;
+    AscendC::LocalTensor<GElementInput> gInputUbTensor_pong;
     AscendC::LocalTensor<VElementOutput> vNewOutputUbTensor_pong;
     AscendC::LocalTensor<VElementOutput> vNewDecayUbTensor_pong;
 
