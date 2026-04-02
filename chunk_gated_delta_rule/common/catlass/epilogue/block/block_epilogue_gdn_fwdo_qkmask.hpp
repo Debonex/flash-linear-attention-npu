@@ -74,8 +74,8 @@ public:
         constexpr uint32_t OUT_HALF_UB_TENSOR_OFFSET_PING = OUT_UB_TENSOR_OFFSET_PING + FLOAT_UB_TENSOR_SIZE;
 
         gUbTensorPing = resource.ubBuf.template GetBufferByByte<float>(G_UB_TENSOR_OFFSET_PING);
-        gUbFPTensorPing = resource.ubBuf.template GetBufferByByte<AElementOutput>(G_HALF_UB_TENSOR_OFFSET_PING);
-        gUbBFTensorPing = resource.ubBuf.template GetBufferByByte<AElementOutput>(G_HALF_UB_TENSOR_OFFSET_PING);
+        gUbFPTensorPing = resource.ubBuf.template GetBufferByByte<GElementInput>(G_HALF_UB_TENSOR_OFFSET_PING);
+        gUbBFTensorPing = resource.ubBuf.template GetBufferByByte<GElementInput>(G_HALF_UB_TENSOR_OFFSET_PING);
         aUbTensorPing = resource.ubBuf.template GetBufferByByte<float>(A_UB_TENSOR_OFFSET_PING);
         outUbTensorPing = resource.ubBuf.template GetBufferByByte<float>(OUT_UB_TENSOR_OFFSET_PING);
         outUbFPTensorPing = resource.ubBuf.template GetBufferByByte<AElementOutput>(OUT_HALF_UB_TENSOR_OFFSET_PING);
@@ -88,8 +88,8 @@ public:
         constexpr uint32_t OUT_HALF_UB_TENSOR_OFFSET_PONG = OUT_UB_TENSOR_OFFSET_PONG + FLOAT_UB_TENSOR_SIZE;
 
         gUbTensorPong = resource.ubBuf.template GetBufferByByte<float>(G_UB_TENSOR_OFFSET_PONG);
-        gUbFPTensorPong = resource.ubBuf.template GetBufferByByte<AElementOutput>(G_HALF_UB_TENSOR_OFFSET_PONG);
-        gUbBFTensorPong = resource.ubBuf.template GetBufferByByte<AElementOutput>(G_HALF_UB_TENSOR_OFFSET_PONG);
+        gUbFPTensorPong = resource.ubBuf.template GetBufferByByte<GElementInput>(G_HALF_UB_TENSOR_OFFSET_PONG);
+        gUbBFTensorPong = resource.ubBuf.template GetBufferByByte<GElementInput>(G_HALF_UB_TENSOR_OFFSET_PONG);
         aUbTensorPong = resource.ubBuf.template GetBufferByByte<float>(A_UB_TENSOR_OFFSET_PONG);
         outUbTensorPong = resource.ubBuf.template GetBufferByByte<float>(OUT_UB_TENSOR_OFFSET_PONG);
         outUbFPTensorPong = resource.ubBuf.template GetBufferByByte<AElementOutput>(OUT_HALF_UB_TENSOR_OFFSET_PONG);
@@ -171,8 +171,8 @@ public:
             AscendC::LocalTensor<AElementOutput> outUbFPTensor = (pingpongFlag == 0) ? outUbFPTensorPing : outUbFPTensorPong;
             AscendC::LocalTensor<AElementOutput> outUbBFTensor = (pingpongFlag == 0) ? outUbBFTensorPing : outUbBFTensorPong;
             AscendC::LocalTensor<float> gUbTensor = (pingpongFlag == 0) ? gUbTensorPing : gUbTensorPong;
-            AscendC::LocalTensor<AElementOutput> gUbFPTensor = (pingpongFlag == 0) ? gUbFPTensorPing : gUbFPTensorPong;
-            AscendC::LocalTensor<AElementOutput> gUbBFTensor = (pingpongFlag == 0) ? gUbBFTensorPing : gUbBFTensorPong;
+            AscendC::LocalTensor<GElementInput> gUbFPTensor = (pingpongFlag == 0) ? gUbFPTensorPing : gUbFPTensorPong;
+            AscendC::LocalTensor<GElementInput> gUbBFTensor = (pingpongFlag == 0) ? gUbBFTensorPing : gUbBFTensorPong;
 
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID1 + pingpongFlag);
@@ -181,9 +181,17 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0);
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag); 
-            AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gfloatUbParams, gUbPadParams);
+            if constexpr(std::is_same<GElementInput, float>::value) {
+                AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gfloatUbParams, gUbPadParams);
+            } else {
+                AscendC::DataCopyPad(gUbFPTensor, gInputThisSubBlock, ghalfUbParams, gUbPadParams);
+            }
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0 + pingpongFlag);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0 + pingpongFlag);
+            if constexpr(!std::is_same<GElementInput, float>::value) {
+                AscendC::Cast(gUbTensor, gUbFPTensor, AscendC::RoundMode::CAST_NONE, mActual);
+                AscendC::PipeBarrier<PIPE_V>();
+            }
             AscendC::Copy(gcompUbTensor, gUbTensor, 64, 2, {1, 1, 8, 8});
             AscendC::PipeBarrier<PIPE_V>();        
 
@@ -251,8 +259,8 @@ public:
             AscendC::DataCopyPadParams gUbPadParams{false, 0, 0, 0}; 
 
             AscendC::LocalTensor<float> gUbTensor = (pingpongFlag == 0) ? gUbTensorPing : gUbTensorPong;
-            AscendC::LocalTensor<AElementOutput> gUbFPTensor = (pingpongFlag == 0) ? gUbFPTensorPing : gUbFPTensorPong;
-            AscendC::LocalTensor<AElementOutput> gUbBFTensor = (pingpongFlag == 0) ? gUbBFTensorPing : gUbBFTensorPong;
+            AscendC::LocalTensor<GElementInput> gUbFPTensor = (pingpongFlag == 0) ? gUbFPTensorPing : gUbFPTensorPong;
+            AscendC::LocalTensor<GElementInput> gUbBFTensor = (pingpongFlag == 0) ? gUbBFTensorPing : gUbBFTensorPong;
 
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag);
 
@@ -260,9 +268,17 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID0);
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID0 + pingpongFlag); 
-            AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gfloatUbParams, gUbPadParams);
+            if constexpr(std::is_same<GElementInput, float>::value) {
+                AscendC::DataCopyPad(gUbTensor, gInputThisSubBlock, gfloatUbParams, gUbPadParams);
+            } else {
+                AscendC::DataCopyPad(gUbFPTensor, gInputThisSubBlock, ghalfUbParams, gUbPadParams);
+            }
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0 + pingpongFlag);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0 + pingpongFlag);
+            if constexpr(!std::is_same<GElementInput, float>::value) {
+                AscendC::Cast(gUbTensor, gUbFPTensor, AscendC::RoundMode::CAST_NONE, mActual);
+                AscendC::PipeBarrier<PIPE_V>();
+            }
             AscendC::Copy(gcompUbTensor, gUbTensor, 64, 2, {1, 1, 8, 8});
             AscendC::PipeBarrier<PIPE_V>();   
 
@@ -382,16 +398,16 @@ private:
     AscendC::LocalTensor<uint8_t> shareUbTensor;
 
     AscendC::LocalTensor<float> gUbTensorPing;
-    AscendC::LocalTensor<AElementOutput> gUbFPTensorPing;
-    AscendC::LocalTensor<AElementOutput> gUbBFTensorPing;
+    AscendC::LocalTensor<GElementInput> gUbFPTensorPing;
+    AscendC::LocalTensor<GElementInput> gUbBFTensorPing;
     AscendC::LocalTensor<float> aUbTensorPing;
     AscendC::LocalTensor<float> outUbTensorPing;
     AscendC::LocalTensor<AElementOutput> outUbFPTensorPing;
     AscendC::LocalTensor<AElementOutput> outUbBFTensorPing;
 
     AscendC::LocalTensor<float> gUbTensorPong;
-    AscendC::LocalTensor<AElementOutput> gUbFPTensorPong;
-    AscendC::LocalTensor<AElementOutput> gUbBFTensorPong;
+    AscendC::LocalTensor<GElementInput> gUbFPTensorPong;
+    AscendC::LocalTensor<GElementInput> gUbBFTensorPong;
     AscendC::LocalTensor<float> aUbTensorPong;
     AscendC::LocalTensor<float> outUbTensorPong;
     AscendC::LocalTensor<AElementOutput> outUbFPTensorPong;

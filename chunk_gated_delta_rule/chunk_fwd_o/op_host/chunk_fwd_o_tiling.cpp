@@ -86,6 +86,14 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     auto dtype = context->GetInputTensor(0)->GetDataType();
     uint64_t dataType = dtype == ge::DT_BF16 ? 1 : 0;
 
+    auto gDType = context->GetOptionalInputTensor(INPUT_G_IDX)->GetDataType();
+    int64_t gDataType = 2;
+    if (gDType == ge::DT_BF16) {
+        gDataType = 1;
+    } else if (gDType == ge::DT_FLOAT16) {
+        gDataType = 0;
+    }
+   
     const auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     uint32_t aicCoreNum = ascendcPlatform.GetCoreNumAic();
     context->SetBlockDim(aicCoreNum);
@@ -127,6 +135,7 @@ ge::graphStatus Tiling4ChunkFwdO(gert::TilingContext *context)
     tiling.set_isVariedLen(isVariedLen);
     tiling.set_tokenBatch(tokenBatch);
     tiling.set_dataType(dataType);
+    tiling.set_gDataType(gDataType);
 
     tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
     context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());

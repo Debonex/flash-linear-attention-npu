@@ -33,19 +33,53 @@ using namespace Catlass;
 namespace Catlass::Gemm::Kernel {
 
 template<
-    class CubeScheduler, 
-    class VecScheduler, 
-    class BlockMmadQK,
-    class BlockMmadQH,
-    class BlockMmadAttenVNEW,
-    class EpilogueGDNFwdOQkmask,
-    class EpilogueGDNFwdOOutput
+    typename INPUT_TYPE,
+    typename G_TYPE,
+    typename WORKSPACE_TYPE
 >
 class GDNFwdOKernel {
 public:
     
     using ArchTag = Arch::AtlasA2;
     using GDNFwdOOffsets = Catlass::Gemm::Block::GDNFwdOOffsets;
+
+    using CubeScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOCube;
+    using VecScheduler = typename Catlass::Gemm::Block::BlockSchedulerGdnFwdOVec;
+
+    using DispatchPolicyTla = Gemm::MmadPingpongTlaMulti<ArchTag, true>;
+    using L1TileShapeTla = Shape<_128, _128, _128>;
+    using L0TileShapeTla = L1TileShapeTla;
+    using QType = Gemm::GemmType<INPUT_TYPE, layout::RowMajor>;
+    using KType = Gemm::GemmType<INPUT_TYPE, layout::ColumnMajor>;
+    using AttenType = Gemm::GemmType<WORKSPACE_TYPE, layout::RowMajor>;
+    using AttenMaskedType = Gemm::GemmType<INPUT_TYPE, layout::RowMajor>;
+    using HType = Gemm::GemmType<INPUT_TYPE, layout::RowMajor>;
+    using OinterType = Gemm::GemmType<WORKSPACE_TYPE, layout::RowMajor>;
+    using VNEWType = Gemm::GemmType<INPUT_TYPE, layout::RowMajor>;
+
+    using GType = Gemm::GemmType<G_TYPE, layout::RowMajor>;
+    using OType = Gemm::GemmType<INPUT_TYPE, layout::RowMajor>;
+    using MaskType = Gemm::GemmType<bool, layout::RowMajor>;
+
+    // cube 1
+    using TileCopyQK = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, INPUT_TYPE, layout::RowMajor, INPUT_TYPE, layout::ColumnMajor, WORKSPACE_TYPE, layout::RowMajor>;
+    using BlockMmadQK = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, INPUT_TYPE, INPUT_TYPE, WORKSPACE_TYPE, void, TileCopyQK>;
+
+    // cube 2
+    using TileCopyQH = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, INPUT_TYPE, layout::RowMajor, INPUT_TYPE, layout::RowMajor, WORKSPACE_TYPE, layout::RowMajor>;
+    using BlockMmadQH = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, INPUT_TYPE, INPUT_TYPE, WORKSPACE_TYPE, void, TileCopyQH>;
+
+    // cube 3
+    using TileCopyAttenVNEW = Catlass::Gemm::Tile::PackedTileCopyTla<ArchTag, INPUT_TYPE, layout::RowMajor, INPUT_TYPE, layout::RowMajor, WORKSPACE_TYPE, layout::RowMajor>;
+    using BlockMmadAttenVNEW = Gemm::Block::BlockMmadTla<DispatchPolicyTla, L1TileShapeTla, L0TileShapeTla, INPUT_TYPE, INPUT_TYPE, WORKSPACE_TYPE, void, TileCopyAttenVNEW>;
+
+    // vec 1
+    using DispatchPolicyGDNFwdOQkmask = Epilogue::EpilogueAtlasA2GDNFwdOQkmask;
+    using EpilogueGDNFwdOQkmask = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdOQkmask, AttenMaskedType, GType, AttenType, MaskType>;
+
+    // vec 2
+    using DispatchPolicyGDNFwdOOutput = Epilogue::EpilogueAtlasA2GDNFwdOOutput;
+    using EpilogueGDNFwdOOutput = Epilogue::Block::BlockEpilogue<DispatchPolicyGDNFwdOOutput, OType, GType, OinterType, OinterType>;
 
     using ElementQ = typename BlockMmadQK::ElementA;
     using LayoutQ = Catlass::layout::RowMajor;
@@ -70,8 +104,7 @@ public:
     using LayoutVNEW = Catlass::layout::RowMajor;
 
 
-    using ElementA = half;
-    using ElementG = float;
+    using ElementG = G_TYPE;
     using ElementMask = bool;
 
     using L1TileShape = typename BlockMmadQK::L1TileShape;
