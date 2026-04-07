@@ -98,6 +98,7 @@ public:
     uint32_t vWorkspaceOffset;
     uint32_t vUpdateWorkspaceOffset;
     uint32_t hWorkspaceOffset;
+    uint32_t numChunksWorkspaceOffset;
     
     AscendC::GlobalTensor<ElementK> gmK;
     AscendC::GlobalTensor<ElementW> gmW;
@@ -142,6 +143,7 @@ public:
         vWorkspaceOffset = gdnFwdHTilingData->vWorkspaceOffset;
         vUpdateWorkspaceOffset = gdnFwdHTilingData->vUpdateWorkspaceOffset;
         hWorkspaceOffset = gdnFwdHTilingData->hWorkspaceOffset;
+        numChunksWorkspaceOffset = gdnFwdHTilingData->numChunksWorkspaceOffset;
         
         gmK.SetGlobalBuffer((__gm__ ElementK *)k);
         gmW.SetGlobalBuffer((__gm__ ElementW *)w);
@@ -156,14 +158,14 @@ public:
         gmHWorkspace.SetGlobalBuffer((__gm__ ElementHWork *)(user + hWorkspaceOffset));
 
         gmSeqlen.SetGlobalBuffer((__gm__ int64_t *)cu_seqlens);
-        gmNumChunks.SetGlobalBuffer((__gm__ int64_t *)chunk_indices);
+        gmNumChunks.SetGlobalBuffer((__gm__ int64_t *)(user + numChunksWorkspaceOffset));
 
         if ASCEND_IS_AIC {
-            cubeBlockScheduler.Init(cu_seqlens, chunk_indices, tiling);
+            cubeBlockScheduler.Init(cu_seqlens, chunk_indices, tiling, user);
         }
 
         if ASCEND_IS_AIV {
-            vecBlockScheduler.Init(cu_seqlens, chunk_indices, tiling);
+            vecBlockScheduler.Init(cu_seqlens, chunk_indices, tiling, user);
         }
     }
     

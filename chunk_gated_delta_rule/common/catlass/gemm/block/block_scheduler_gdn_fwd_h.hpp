@@ -60,6 +60,7 @@ struct BlockSchedulerGdnFwdH {
     uint32_t tokenBatch;
     bool useInitialState;
     bool storeFinalState;
+    uint32_t numChunksWorkspaceOffset;
 
     uint32_t taskIdx;
     uint32_t taskLoops;
@@ -108,7 +109,7 @@ struct BlockSchedulerGdnFwdH {
     BlockSchedulerGdnFwdH() {}
 
     CATLASS_DEVICE
-    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling, uint32_t coreIdx, uint32_t coreNum) {
+    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling, GM_ADDR user, uint32_t coreIdx, uint32_t coreNum) {
         __gm__ ChunkGatedDeltaRuleFwdHTilingData *__restrict gdnFwdHTilingData = reinterpret_cast<__gm__ ChunkGatedDeltaRuleFwdHTilingData *__restrict>(tiling);
 
         batch = gdnFwdHTilingData->batch;
@@ -123,9 +124,10 @@ struct BlockSchedulerGdnFwdH {
         tokenBatch = gdnFwdHTilingData->tokenBatch;
         useInitialState = gdnFwdHTilingData->useInitialState;
         storeFinalState = gdnFwdHTilingData->storeFinalState;
+        numChunksWorkspaceOffset = gdnFwdHTilingData->numChunksWorkspaceOffset;
 
         gmSeqlen.SetGlobalBuffer((__gm__ int64_t *)cu_seqlens);
-        gmNumChunks.SetGlobalBuffer((__gm__ int64_t *)chunk_indices);
+        gmNumChunks.SetGlobalBuffer((__gm__ int64_t *)(user + numChunksWorkspaceOffset));
 
         cubeCoreIdx = coreIdx;
         cubeCoreNum = coreNum;
@@ -234,8 +236,8 @@ struct BlockSchedulerGdnFwdHCube : public BlockSchedulerGdnFwdH {
     BlockSchedulerGdnFwdHCube() {}
 
     CATLASS_DEVICE
-    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling) {
-        BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, AscendC::GetBlockIdx(), AscendC::GetBlockNum());
+    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling, GM_ADDR user) {
+        BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, user, AscendC::GetBlockIdx(), AscendC::GetBlockNum());
     }
 
 };
@@ -245,8 +247,8 @@ struct BlockSchedulerGdnFwdHVec : public BlockSchedulerGdnFwdH {
     BlockSchedulerGdnFwdHVec() {}
 
     CATLASS_DEVICE
-    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling) {
-        BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, AscendC::GetBlockIdx() / AscendC::GetSubBlockNum(), AscendC::GetBlockNum());
+    void Init(GM_ADDR cu_seqlens, GM_ADDR chunk_indices, GM_ADDR tiling, GM_ADDR user) {
+        BlockSchedulerGdnFwdH::Init(cu_seqlens, chunk_indices, tiling, user, AscendC::GetBlockIdx() / AscendC::GetSubBlockNum(), AscendC::GetBlockNum());
     }
 
 };

@@ -131,6 +131,9 @@ ge::graphStatus Tiling4ChunkGatedDeltaRuleFwdH(gert::TilingContext *context)
     tiling.set_hWorkspaceOffset(workspaceOffset);
     workspaceOffset += (aicCoreNum * kHeadDim * vHeadDim * sizeof(float) * PING_PONG_STAGES + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
 
+    tiling.set_numChunksWorkspaceOffset(workspaceOffset);
+    workspaceOffset += ((tokenBatch + 1) * sizeof(int64_t) + GM_ALIGN) / GM_ALIGN * GM_ALIGN;
+
     workspaceOffset += WORKSPACE_RSV_BYTE;
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
     currentWorkspace[0] = (workspaceOffset - 0);
